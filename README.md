@@ -23,7 +23,7 @@ Der Ersatz für Pocket, Instapaper & Co: Sende eine Mail mit einem Link an eine 
 ## imap-delete.py
 Der Spamfilter für Nachrichten: Keine Lust auf Nachrichten über Donald Trump? Filtere einfach alle Schlagzeilen, die "Trump" enthalten. Kein Interesse an Fußball? Weg damit! Kein Apple-Fan? Lösche einfach alle Nachrichten über das neue iPhone.
 
-## pocket-mailer.py / pocket-mailer-epub.py
+## IMAP2txt.py / IMAP2epub.py
 Erhalte ein ePub bzw. eine Textdatei per Mail mit allen deinen für's Später-Lesen gespeicherten Artikeln. Auf diese Weise kann man z.B. auch automatisch den Amazon Kindle befüllen.
 
 ## tolino.py
