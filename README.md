@@ -1,3 +1,5 @@
+![Nachrichtensortiermaschine](https://schmalenstroer.net/nachrichtensortiermaschine.png "Nachrichtensortiermaschine")
+
 # Was ist die Nachrichtensortiermaschine?
 Sie ist ein Set von 7 Python-Skripten in Kombination mit [RSS2Email](https://github.com/rss2email/rss2email), welches es ermöglicht, Nachrichten, Blogs, Newsletter und Informationen einfach, werbefrei und unaufgeregt zu lesen und zu filtern. Wenn alles eingerichtet ist, bekommt man alle Nachrichten als Volltext im eigenen E-Mail-Postfach. Themen, die einen nicht interessieren, werden gefiltert und alles, was man später in Ruhe auf dem Sofa lesen will, landet auf dem eBookreader.
 
