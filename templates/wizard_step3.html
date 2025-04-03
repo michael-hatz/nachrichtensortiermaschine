@@ -1,0 +1,28 @@
+<form method="POST">
+    <label for="feed_url">Feed URL:</label>
+    <input type="url" id="feed_url" name="feed_url" required><br>
+
+    <label for="imap_mailbox">IMAP Mailbox:</label>
+    <input type="text" id="imap_mailbox" name="imap_mailbox" value="INBOX" required><br>
+
+    <label for="fulltext">Fulltext:</label>
+    <select name="fulltext">
+        <option value="True">True</option>
+        <option value="False">False</option>
+    </select><br>
+
+    <label for="active">Active:</label>
+    <select name="active">
+        <option value="True">True</option>
+        <option value="False">False</option>
+    </select><br>
+
+    <button type="submit">Add Feed</button>
+    <button type="submit" name="finish_feeds">Finish Adding Feeds</button>
+</form>
+
+<form method="POST" enctype="multipart/form-data" action="{{ url_for('upload_opml') }}">
+    <label for="opml_file">Upload OPML File:</label>
+    <input type="file" name="opml_file" id="opml_file" accept=".opml"><br>
+    <button type="submit">Upload OPML</button>
+</form>

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nachrichtensortiermaschine</title>
+    <style>
+        /* Basic Styling */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f9f9;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+            margin-top: 20px;
+        }
+
+        /* Tabs Layout */
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+        .tab {
+            padding: 15px 25px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            border: 1px solid #ccc;
+            margin: 0 5px;
+            border-radius: 5px 5px 0 0;
+            transition: background-color 0.3s ease;
+        }
+        .tab:hover {
+            background-color: #e0e0e0;
+        }
+        .tab.active {
+            background-color: #0056b3;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+            margin-top: -1px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Textarea Styling */
+        textarea {
+            width: 100%;
+            height: 400px;
+            font-family: monospace;
+            font-size: 14px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            resize: none;
+            background-color: #f9f9f9;
+        }
+
+        /* Button */
+        button {
+            background-color: #0056b3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+            display: block;
+            margin: 20px auto;
+        }
+        button:hover {
+            background-color: #004494;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 14px;
+        }
+        footer a {
+            text-decoration: none;
+            color: #0066cc;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>Nachrichtensortiermaschine</h1>
+    
+    <!-- Tab Buttons -->
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('config')">config.cfg</div>
+        <div class="tab" onclick="showTab('feeds')">feeds.cfg</div>
+        <div class="tab" onclick="showTab('filter')">filter.txt</div>
+        <div class="tab" onclick="showTab('FAQ')">FAQ</div>
+    </div>
+
+    <!-- Tab Content -->
+    <form action="{{ url_for('save') }}" method="post">
+        <div id="config" class="tab-content active">
+            <h2>config.cfg</h2>
+            <textarea name="config">{{ config }}</textarea>
+        </div>
+        <div id="feeds" class="tab-content">
+            <h2>feeds.cfg</h2>
+            <textarea name="feeds">{{ feeds }}</textarea>
+        </div>
+        <div id="filter" class="tab-content">
+            <h2>filter.txt</h2>
+            <textarea name="filter">{{ filter }}</textarea>
+        </div>
+        <div id="FAQ" class="tab-content">
+            <h1>FAQ</h1>
+                <h2>How to Use</h2>
+
+    <h3>Configuration</h3>
+    <p>Please configure your mail settings here:</p>
+
+    <div class="note">
+        <strong>Recommendation:</strong> I recommend using a separate mail account for this program. If you're trying to integrate news, order confirmations, private communication, and so on into one INBOX, it will end in chaos.
+    </div>
+
+    <p>If you're using Gmail (which you shouldn't) with 2FA, you have to set an app password.</p>
+
+    <p><strong>Regarding the Artikelpostfach-Configuration:</strong> This is for the integrated Pocket/Instapaper/Readlater-Functionality. Send a link to the mail you've configured in [imap-Artikelpostfach] and Nachrichtensortiermaschine will fetch the full text and send it with the SMTP-Server to the address configured in [smtp-Artikelpostfach].</p>
+    
+    <p>I'm using a second mail address here because this allows me to send articles from several mail addresses without figuring out where and how to separate them from other mails.</p>
+
+    <div class="note">
+        <strong>Note:</strong> Pocket-Ersatz.py will scan every mail here for links and open a Firefox with BypassPaywall & I still don't care about cookies in the background to fetch the articles. You may want to configure a whitelist of allowed senders to prevent spam from being processed.
+        You also need to configure a folder called "Archiv" in the root of your mailbox
+    </div>
+
+    <pre>[imap-Artikelpostfach]
+[smtp-Artikelpostfach]</pre>
+
+    <h3>Feeds</h3>
+    <p>Put in feeds in this configuration:</p>
+
+    <pre>[feed.name]
+url = URL of the feed
+fulltext = True/False
+If False, Nachrichtensortiermaschine takes the text included in the RSS feed
+Use "True" for truncated feeds. Nachrichtensortiermaschine will load the linked article and give you the full text. Please be aware: This won't work if the full text is behind a paywall or if the site in question uses some enhanced bot protection
+
+active = True/False
+If you want to pause / stop the feed, set to False
+
+imap-mailbox = INBOX
+You can deliver your mails to subfolders, which I highly recommend. Just create the INBOX/CustomFolder in your mail program and set this to INBOX/CustomFolder
+
+Filterfolder:
+the mail folder where you want to move your filtered mails
+
+OpenAI Key:
+Currently deactivated by default: If you want, you can put in your OpenAI key here and configure nsm.py to include a summary of the article or to provide tags. I deactivated this because the costs did not justify the benefits for me.
+
+backup_to_archiveorg:
+Currently not functional
+
+[cronjobs]
+Currently not functional
+</pre>
+    <h3>Filter</h3>
+    <p>Put in keywords here (one per line) and if the keyword is included in a mail subject, the mail will be moved to the folder you've configured in configuration → Filterfolder.</p>
+    
+    <h4>How does this work?</h4>
+    <ul>
+        <li>Put in e.g. <strong>Trump</strong> in the filter.</li>
+        <li>It only searches in the subject of the mail, so if Trump is mentioned there, it gets moved. If Trump is mentioned somewhere in the body of the mail, it is not moved.</li>
+        <li>If you want to change that, you can change it in nsm.py.</li>
+        <li>Please be careful with filtering: If you filter <strong>"AI"</strong>, you may also filter out <strong>"Malaysia"</strong>.</li>
+    </ul>
+
+    <h3>Timings:</h3>
+    <h4>nsm.py</h4>
+    <p>- The main engine that fetches your feeds<br>
+       - Runs once an hour as default</p>
+
+    <h4>pocket-ersatz.py</h4>
+    <p>- The script that fetches your read-later articles<br>
+       - Runs once an hour as default</p>
+
+    <h4>pocket-mailer.py</h4>
+    <p>- Sends everything in your read-later folder as text<br>
+       - Runs once a day at 07:30:00 in the morning</p>
+
+    <h4>pocket-mailer-epub.py</h4>
+    <p>- Sends everything in your read-later folder as ePub<br>
+       - Doesn't run by default</p>
+
+    <h3>Nachrichtensortiermaschine plays nicely along your newsletters</h3>
+    <p>Get some news via RSS and subscribe to other insightful texts from your favourite authors via their newsletter. We are living in a golden age of newsletters, so feel free to mix things up!</p>
+
+    <h3>Social Features</h3>
+    <p>Everybody has a mail address. Simply forward the mail with the article to whoever you want to read it. Feel free to add a comment.</p>
+
+        </div>
+
+        <button type="submit">Save Changes</button>
+    </form>
+
+    <!-- Footer with Link -->
+    <footer>
+        <p>Nachrichtensortiermaschine: <a href="https://github.com/michael-hatz/nachrichtensortiermaschine" target="_blank">GitHub</a></p>
+    </footer>
+
+    <script>
+        // Function to switch between tabs
+        function showTab(tabName) {
+            // Remove the 'active' class from all tabs and tab content
+            document.querySelectorAll('.tab').forEach(function(tab) {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(function(content) {
+                content.classList.remove('active');
+            });
+
+            // Add 'active' class to the selected tab and corresponding content
+            document.querySelector(`.tab[onclick="showTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+        }
+    </script>
+</body>
+</html>
+

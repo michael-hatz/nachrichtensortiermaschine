@@ -1,0 +1,15 @@
+feedparser
+imap-tools
+requests
+pandas
+trafilatura
+beautifulsoup4
+markdown
+lxml_html_clean
+selenium
+openai
+markdownify
+pypandoc
+xml2epub
+flask
+
