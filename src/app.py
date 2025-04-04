@@ -109,11 +109,15 @@ def export_opml():
 @app.route('/import-opml', methods=['POST'])
 def import_opml():
     """Import an OPML file and update feeds.cfg."""
+    print("Request files:", request.files)  # Debug: Log request files
+
     if 'file' not in request.files:
+        print("No file part in request.")  # Debug: Log missing file
         return "No file part", 400
 
     file = request.files['file']
     if file.filename == '':
+        print("No selected file.")  # Debug: Log empty filename
         return "No selected file", 400
 
     if file:
@@ -121,10 +125,22 @@ def import_opml():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
 
+        # Debug: Log the uploaded file path
+        print(f"Uploaded OPML file saved to: {file_path}")
+
         # Parse OPML file
         import xml.etree.ElementTree as ET
-        tree = ET.parse(file_path)
-        root = tree.getroot()
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+        except ET.ParseError as e:
+            print(f"Error parsing OPML file: {e}")
+            return "Invalid OPML file", 400
+
+        # Debug: Log the parsed OPML structure
+        print("Parsed OPML structure:")
+        for outline in root.findall(".//outline"):
+            print(outline.attrib)
 
         # Update feeds.cfg
         config = configparser.ConfigParser()
@@ -140,9 +156,21 @@ def import_opml():
                 'imap-mailbox': outline.get('imap-mailbox', 'INBOX')
             }
 
+        # Debug: Log the updated feeds.cfg content
+        print("Updated feeds.cfg content:")
+        for section in config.sections():
+            print(f"[{section}]")
+            for key, value in config[section].items():
+                print(f"{key} = {value}")
+
         # Save updated feeds.cfg
-        with open(feeds_path, 'w', encoding='utf-8') as configfile:
-            config.write(configfile)
+        try:
+            with open(feeds_path, 'w', encoding='utf-8') as configfile:
+                config.write(configfile)
+            print(f"feeds.cfg successfully updated at {feeds_path}")
+        except Exception as e:
+            print(f"Error writing to feeds.cfg: {e}")
+            return "Error updating feeds.cfg", 500
 
         return "OPML imported successfully!"
 

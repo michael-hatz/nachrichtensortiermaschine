@@ -322,6 +322,11 @@ Currently not functional
 
         function uploadOpml() {
             const fileInput = document.getElementById('opml-file');
+            if (!fileInput.files.length) {
+                alert('Please select an OPML file to upload.');
+                return;
+            }
+
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
 
