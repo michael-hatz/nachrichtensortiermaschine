@@ -47,16 +47,36 @@ receiver_email = mail_dict['SMTP']['receiver_email']
 password = mail_dict['SMTP']['password']
 
 def load_killfile():
-    """Load the killfile.txt into a list of strings."""
+    """Load the killfile.txt into a list of phrases."""
     killfile_path = os.path.join(script_directory, "/app/data/killfile.txt")
     with open(killfile_path, "r", encoding="utf-8") as file:
-        return [line.strip() for line in file]
+        # Split the file into paragraphs (phrases)
+        return [paragraph.strip() for paragraph in file.read().split("\n\n") if paragraph.strip()]
+
 
 def filter_killfile(content, killfile):
-    """Remove strings in killfile from the content."""
-    for phrase in killfile:
-        content = content.replace(phrase, "")
-    return content
+    """
+    Remove all phrases in the killfile from the content while preserving HTML formatting.
+    Handles phrases with or without HTML formatting in the content.
+    """
+    # Parse the HTML content
+    soup = BeautifulSoup(content, "html.parser")
+
+    # Iterate over all text nodes in the HTML
+    for text_node in soup.find_all(string=True):
+        # Normalize the text node
+        text = text_node.strip()
+        for phrase in killfile:
+            # Normalize the killfile phrase
+            normalized_phrase = phrase.strip()
+            # Remove the killfile phrase from the text node
+            if normalized_phrase in text:
+                text = text.replace(normalized_phrase, "")
+        # Update the text node with the filtered text
+        text_node.replace_with(text)
+
+    # Return the modified HTML as a string
+    return str(soup)
 
 def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     # Load killfile and filter content
