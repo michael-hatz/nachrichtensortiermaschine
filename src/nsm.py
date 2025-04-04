@@ -46,43 +46,65 @@ sender_email = mail_dict['SMTP']['sender_email']
 receiver_email = mail_dict['SMTP']['receiver_email']
 password = mail_dict['SMTP']['password']
 
+def load_killfile():
+    """Load the killfile.txt into a list of strings."""
+    killfile_path = os.path.join(script_directory, "/app/data/killfile.txt")
+    with open(killfile_path, "r", encoding="utf-8") as file:
+        return [line.strip() for line in file]
+
+def filter_killfile(content, killfile):
+    """Remove strings in killfile from the content."""
+    for phrase in killfile:
+        content = content.replace(phrase, "")
+    return content
+
 def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
-    #definiere nachricht
+    # Load killfile and filter content
+    killfile = load_killfile()
+    artikel_content = filter_killfile(artikel_content, killfile)
+
+    # Define the email message
     message = MIMEMultipart("alternative")
     try:
         message["Subject"] = artikel_titel
     except AttributeError:
         artikel_titel = "Kein Titel"
         message["Subject"] = artikel_url
-    
+
     message["From"] = sender_email
     message["To"] = receiver_email
-  
+
     text = artikel_content
     html = artikel_content
 
-
-
-#berechnen länge
-    
+    # Calculate length
     html = str(html)
     text = str(text)
     laengetext = len(html.split())
     laengetextstr = str(laengetext)
 
-#Zusammenbau HTML-Mail
-    html = "\n\n====================\n\n<br>Titel: " + artikel_titel +  " \n\n<br>URL: " + '<a href="' + artikel_url + '">' + artikel_url + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + "\n\n<br> ====================\n\n\n<br>" + html
-    text = "\n\n====================\n\n<br>Titel: " + artikel_titel +  " \n\n<br>URL: " + '<a href="' + artikel_url + '">' + artikel_url + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + "\n\n<br> ====================\n\n\n<br>" + text
-    
-#hier wäre platz für formatierung der Mail
+    # Build HTML email
+    html = (
+        f"\n\n====================\n\n<br>Titel: {artikel_titel} \n\n<br>URL: "
+        f'<a href="{artikel_url}">{artikel_url}</a>'
+        f"\n\n <br>Länge: {laengetextstr} Wörter\n\n\n"
+        f"\n\n<br> ====================\n\n\n<br>{html}"
+    )
+    text = (
+        f"\n\n====================\n\n<br>Titel: {artikel_titel} \n\n<br>URL: "
+        f'<a href="{artikel_url}">{artikel_url}</a>'
+        f"\n\n <br>Länge: {laengetextstr} Wörter\n\n\n"
+        f"\n\n<br> ====================\n\n\n<br>{text}"
+    )
 
+    # Attach parts
     part1 = MIMEText(text, "plain")
     part2 = MIMEText(html, "html")
     message.attach(part1)
     message.attach(part2)
-# header dazu
-    message['X-Special-Header'] = mailbox
-#absenden mail
+
+    # Add header and send email
+    message["X-Special-Header"] = mailbox
     context = ssl.create_default_context()
     with smtplib.SMTP(smtp_server, port) as server:
         server.starttls(context=context)

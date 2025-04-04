@@ -100,6 +100,41 @@
             color: #0066cc;
         }
 
+        .script-buttons {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .script-buttons h2 {
+            color: #0056b3;
+            margin-bottom: 15px;
+        }
+        .script-buttons button {
+            display: inline-block;
+            margin: 5px;
+            background-color: #0056b3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        .script-buttons button:hover {
+            background-color: #004494;
+        }
+        .file-upload {
+            display: inline-block;
+            margin: 10px;
+        }
+        #actions .script-buttons {
+            background-color: transparent;
+            padding: 0;
+        }
+
     </style>
 </head>
 <body>
@@ -110,11 +145,14 @@
         <div class="tab active" onclick="showTab('config')">config.cfg</div>
         <div class="tab" onclick="showTab('feeds')">feeds.cfg</div>
         <div class="tab" onclick="showTab('filter')">filter.txt</div>
+        <div class="tab" onclick="showTab('killfile')">killfile.txt</div>
+        <div class="tab" onclick="showTab('crontab')">crontab</div>
+        <div class="tab" onclick="showTab('actions')">Actions</div>
         <div class="tab" onclick="showTab('FAQ')">FAQ</div>
     </div>
 
     <!-- Tab Content -->
-    <form action="{{ url_for('save') }}" method="post">
+    <form action="/" method="POST">
         <div id="config" class="tab-content active">
             <h2>config.cfg</h2>
             <textarea name="config">{{ config }}</textarea>
@@ -126,6 +164,30 @@
         <div id="filter" class="tab-content">
             <h2>filter.txt</h2>
             <textarea name="filter">{{ filter }}</textarea>
+        </div>
+        <div id="killfile" class="tab-content">
+            <h2>killfile.txt</h2>
+            <textarea name="killfile">{{ killfile }}</textarea>
+        </div>
+        <div id="crontab" class="tab-content">
+            <h2>crontab</h2>
+            <textarea name="crontab">{{ crontab }}</textarea>
+        </div>
+        <div id="actions" class="tab-content">
+            <h2>Actions</h2>
+            <div class="script-buttons">
+                <button type="button" onclick="runScript('fetch-feeds')">Fetch Feeds</button>
+                <button type="button" onclick="runScript('send-txt')">Send TXT</button>
+                <button type="button" onclick="runScript('send-epub')">Send EPUB</button>
+                <button type="button" onclick="window.location.href='/export-opml'">Export OPML</button>
+                <div class="file-upload">
+                    <!-- Move the OPML upload form outside the main form -->
+                    <div id="opml-upload">
+                        <input type="file" id="opml-file" accept=".opml">
+                        <button type="button" onclick="uploadOpml()">Import OPML</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div id="FAQ" class="tab-content">
             <h1>FAQ</h1>
@@ -215,7 +277,10 @@ Currently not functional
 
         </div>
 
+        <!-- Update the Save Changes button -->
         <button type="submit">Save Changes</button>
+        <!-- Place this div somewhere visible, e.g. right under the Save Changes button -->
+        <div id="status" style="text-align: center; font-weight: bold; color: green; display: none;"></div>
     </form>
 
     <!-- Footer with Link -->
@@ -238,6 +303,68 @@ Currently not functional
             document.querySelector(`.tab[onclick="showTab('${tabName}')"]`).classList.add('active');
             document.getElementById(tabName).classList.add('active');
         }
+
+        function runScript(action) {
+            fetch(`/${action}`, { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            })
+            .then(response => response.text())
+            .then(data => {
+                alert(data);
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+
+        function uploadOpml() {
+            const fileInput = document.getElementById('opml-file');
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/import-opml', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(data => {
+                alert(data);
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+
+        // Add form submission handling
+        document.querySelector('form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const statusEl = document.getElementById('status');
+            statusEl.style.display = 'block';
+            statusEl.textContent = 'Saving changes...';
+            const formData = new FormData(this);
+
+            fetch('/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(data => {
+                statusEl.textContent = 'Changes saved!';
+                // Optionally clear the message after a few seconds
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            })
+            .catch(error => {
+                statusEl.textContent = 'Error: ' + error;
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 3000);
+            });
+        });
     </script>
 </body>
 </html>

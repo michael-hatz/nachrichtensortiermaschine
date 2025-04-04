@@ -3,9 +3,6 @@ FROM ubuntu:22.04
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Use an official Ubuntu base image
-FROM ubuntu:22.04
-
 # Update and install necessary packages, including python3-pip
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -46,8 +43,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates
 
-# Copy the local Firefox installer into the container (replace with the correct file path)
-COPY firefox-134.0.2.tar.bz2 /tmp/firefox.tar.bz2
+# Copy the local Firefox installer into the container
+COPY src/files/firefox-134.0.2.tar.bz2 /tmp/firefox.tar.bz2
 
 # Extract and install Firefox
 RUN tar -xjf /tmp/firefox.tar.bz2 -C /opt && \
@@ -59,7 +56,7 @@ RUN python3 -m pip install --upgrade pip && \
     pip3 install selenium
 
 # Copy your local geckodriver to the container
-COPY geckodriver-v0.35.0-linux64.tar.gz /tmp/
+COPY src/files/geckodriver-v0.35.0-linux64.tar.gz /tmp/
 
 # Extract the geckodriver and move it to /usr/local/bin
 RUN tar -xzvf /tmp/geckodriver-v0.35.0-linux64.tar.gz -C /tmp && \
@@ -70,15 +67,17 @@ RUN tar -xzvf /tmp/geckodriver-v0.35.0-linux64.tar.gz -C /tmp && \
 WORKDIR /app
 
 # Copy application code
-COPY requirements.txt ./
-COPY nsm.py ./
-COPY pocket-ersatz.py ./
-COPY pocket-mailer.py ./
-COPY pocket-mailer-epub.py ./
-COPY istilldontcareaboutcookies-1.1.4.xpi ./
-COPY bypass-paywalls-firefox.xpi ./
+COPY src/requirements.txt ./
+COPY src/nsm.py ./
+COPY src/pocket-ersatz.py ./
+COPY src/pocket-mailer.py ./
+COPY src/pocket-mailer-epub.py ./
 
 # Copy custom Firefox extensions into the container
+COPY src/files/istilldontcareaboutcookies-1.1.4.xpi ./
+COPY src/files/bypass-paywalls-firefox.xpi ./
+
+# Copy custom Firefox extensions into the browser extensions directory
 RUN mkdir -p /usr/lib/firefox/browser/extensions/ \
     && cp /app/istilldontcareaboutcookies-1.1.4.xpi /usr/lib/firefox/browser/extensions/ \
     && cp /app/bypass-paywalls-firefox.xpi /usr/lib/firefox/browser/extensions/
@@ -87,10 +86,13 @@ RUN mkdir -p /usr/lib/firefox/browser/extensions/ \
 RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Copy default config files into persistent storage
-COPY config.cfg /app/data/
-COPY urls.tsv /app/data/
-COPY feeds.cfg /app/data/
-COPY filter.txt /app/data/
+COPY src/config.cfg /app/data/
+COPY src/urls.tsv /app/data/
+COPY src/feeds.cfg /app/data/
+COPY src/filter.txt /app/data/
+
+# Copy killfile.txt to the container
+COPY src/killfile.txt /app/data/
 
 # Declare persistent volume
 VOLUME ["/app/data"]
@@ -102,14 +104,14 @@ RUN pip3 install --no-cache-dir -r requirements.txt \
 # Set up cron job to run nsm.py and pocket-ersatz.py every hour
 RUN echo "35 * * * * /usr/bin/python3 /app/nsm.py" > /etc/cron.d/nsm-cron \
     && echo "45 * * * * /usr/bin/python3 /app/pocket-ersatz.py" >> /etc/cron.d/nsm-cron \
-    && echo "27 06 * * * /usr/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1" >> /etc/cron.d/nsm-cron \
+    && echo "27 05 * * * /usr/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1" >> /etc/cron.d/nsm-cron \
     && echo "0 04 * * * rm -r /tmp/*" >> /etc/cron.d/nsm-cron \
     && chmod 0644 /etc/cron.d/nsm-cron \
     && crontab /etc/cron.d/nsm-cron
 
 # Copy Flask app and templates
-COPY app.py /app/
-COPY templates/index.html /app/templates/
+COPY src/app.py /app/
+COPY src/templates/ /app/templates/
 
 # Expose the web interface port
 EXPOSE 5000
