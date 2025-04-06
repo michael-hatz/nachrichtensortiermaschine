@@ -147,14 +147,30 @@ def import_opml():
         feeds_path = '/app/data/feeds.cfg'
         config.read(feeds_path)
 
+        added_feeds = []
+        updated_feeds = []
+        skipped_feeds = []
+
         for outline in root.findall(".//outline"):
             section = outline.get('title', outline.get('text', 'Unnamed Feed'))
-            config[section] = {
+            new_feed = {
                 'url': outline.get('xmlUrl', ''),
                 'fulltext': outline.get('fulltext', 'False'),
                 'active': outline.get('active', 'True'),
                 'imap-mailbox': outline.get('imap-mailbox', 'INBOX')
             }
+
+            if section in config:
+                # Check if the feed is identical
+                existing_feed = dict(config[section])
+                if existing_feed == new_feed:
+                    skipped_feeds.append(section)
+                else:
+                    config[section] = new_feed
+                    updated_feeds.append(section)
+            else:
+                config[section] = new_feed
+                added_feeds.append(section)
 
         # Debug: Log the updated feeds.cfg content
         print("Updated feeds.cfg content:")
@@ -172,7 +188,11 @@ def import_opml():
             print(f"Error writing to feeds.cfg: {e}")
             return "Error updating feeds.cfg", 500
 
-        return "OPML imported successfully!"
+        # Provide feedback to the user
+        return (
+            f"OPML imported successfully! "
+            f"Added: {len(added_feeds)}, Updated: {len(updated_feeds)}, Skipped: {len(skipped_feeds)}"
+        )
 
 def read_file(file_path):
     """Read the content of a file."""

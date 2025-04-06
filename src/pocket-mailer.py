@@ -10,6 +10,7 @@ from imap_tools import MailBox
 import pypandoc
 import os
 import configparser
+from bs4 import BeautifulSoup
 
 #global values
 script_directory = os.path.dirname(os.path.abspath(__file__))
@@ -62,13 +63,35 @@ def sendeanhang(to, subject, body, filename):
     email_session.quit()
     print("YOUR MAIL HAS BEEN SENT SUCCESSFULLY")
     
-#Mailbody lesen und alles in einen riesigen String packen
+# Mailbody lesen und alles in einen riesigen String packen
 buchtext = ""
 with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
     for nachricht in mailbox.fetch(bulk=True):
-        #emailinhalt auch von html news und newslettern auslesen und uebergeben
-        emailinhalt = markdownify.markdownify(nachricht.html, heading_style="ATX")
-        buchtext = emailinhalt + buchtext
+        emailinhalt = ""
+
+        # Try to process the HTML part
+        if nachricht.html:
+            try:
+                # Use BeautifulSoup to clean and extract text from HTML
+                soup = BeautifulSoup(nachricht.html, "html.parser")
+                emailinhalt = soup.get_text(separator="\n").strip()
+                print(f"Extracted HTML content: {emailinhalt}")  # Debug: Log HTML content
+            except Exception as e:
+                print(f"Error processing HTML content: {e}")
+
+        # Fallback to plain text if HTML is empty or fails
+        if not emailinhalt and nachricht.text:
+            emailinhalt = nachricht.text.strip()
+            print(f"Fallback to plain text content: {emailinhalt}")  # Debug: Log plain text content
+
+        # Skip emails with no content
+        if not emailinhalt:
+            print(f"Warning: No content found for email {nachricht.subject}")
+            continue
+
+        # Append the processed content to the book text
+        buchtext = emailinhalt.strip() + "\n\n" + buchtext.strip()
+        print(f"Current buchtext: {buchtext}")  # Debug: Log accumulated content
 
 #Pandoc und dann raussenden
 pypandoc.convert_text(buchtext , 'plain' , 'markdown' , outputfile="nachrichtensortiermaschine.txt" , extra_args = ['--wrap=none'])
