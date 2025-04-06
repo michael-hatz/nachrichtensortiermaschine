@@ -1,5 +1,3 @@
-
-
 """Der Ersatz für Pocket, Instapaper & Co: Sende eine Mail mit einem Link an eine E-Mail-Adresse und erhalte eine E-Mail mit dem Volltext des Links zurück. Auf Wunsch auch mit AI-gesteuerter Zusammenfassung und Verschlagwortung.
 
 Installation:
@@ -70,94 +68,105 @@ firefox_options.add_argument("--purgecaches")
 firefox_options.add_argument('--disable-dev-shm-usage')
 firefox_options.binary_location = "/usr/local/bin/firefox"
 
-driver_service = webdriver.FirefoxService(executable_path=geckodriver_path)
-driver = webdriver.Firefox(options=firefox_options, service=driver_service)
-driver.install_addon(addon_path1)
-driver.install_addon(addon_path2)
-
-
-
 #OpenAI API-Key
 ai.api_key = mail_dict['options']['openai-key']
 
-def getarticleandsendmail(artikel): 
-    
-#trifalatura
-    driver.vars = {}
+def getarticleandsendmail(artikel, driver): 
+    """
+    Process a single article URL, extract content, and send it via email.
+    Reuses the provided WebDriver instance.
+    """
     print(artikel)
     driver.get(artikel)
     print("versuche artikel zu laden")
     time.sleep(5)
     page_source = driver.page_source
-    #print(page_source)
-    #url = trafilatura.fetch_url(artikel)
+
+    # Extract content using Trafilatura
     h = trafilatura.extract(page_source, include_comments=False, include_formatting=True)
-    #print(h)
-#titel extrahieren
-    #soup = BeautifulSoup(url, 'html.parser')
-    #titeldesdokuments = soup.title.string
-    #print("zeile 92")
+    if not h:
+        print(f"Failed to extract content from {artikel}")
+        return
+
+    # Extract title
     titeldesdokuments = driver.title
-    #print("zeile 94")
-    driver.quit()
-    ## 20.12.22: Hier hackt es gerade leicht, da Trafilatura eben einen extrahierten text liefert
-    
     heruntergeladenertextinhtml = markdown.markdown(h)
-    #print("zeile 99")
-    laengetext = len(h.split()) #berechnet wortanzahl
+    laengetext = len(h.split())  # Calculate word count
     laengetextstr = str(laengetext)
 
-#AI-Krams
+    # AI Summary (optional)
     try:
-        anfrage = "Write a summary of this article in 5 bulletpoints. Put a * in front of each bulletpoint. Make two linebreaks after each bulletpoint. Write the summary in German. Also add 5 Tags based on the article. Put two ## in front of each tag  " + heruntergeladenertextinhtml 
+        anfrage = (
+            "Write a summary of this article in 5 bulletpoints. Put a * in front of each bulletpoint. "
+            "Make two linebreaks after each bulletpoint. Write the summary in German. "
+            "Also add 5 Tags based on the article. Put two ## in front of each tag. " + heruntergeladenertextinhtml
+        )
         response = ai.Completion.create(
-        engine="text-curie-001",
-        prompt=anfrage,
-        temperature=0.3,
-        max_tokens=709,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0
+            engine="text-curie-001",
+            prompt=anfrage,
+            temperature=0.3,
+            max_tokens=709,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0
         )
         zusammenfassung = response.choices[0].text
-    except:
-        zusammenfassung = ""    
-#definiere nachricht
+    except Exception as e:
+        print(f"AI summary failed: {e}")
+        zusammenfassung = ""
+
+    # Define email message
     message = MIMEMultipart("alternative")
     message["Subject"] = titeldesdokuments
     message["From"] = sender_email
     message["To"] = receiver_email
-# hier zusammensetzung der mail, das kann man sicherlich noch verbessern
-    text = "\n\n====================\n\n <br>Titel: " + titeldesdokuments + " \n\n<br>URL: " + '<a href="' + artikel + '">' + artikel + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + zusammenfassung + "n\n <br>====================\n\n\n<br>" + heruntergeladenertextinhtml
-    html = "\n\n====================\n\n <br>Titel: " + titeldesdokuments + " \n\n<br>URL: " + '<a href="' + artikel + '">' + artikel + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + zusammenfassung + "\n\n <br>====================\n\n\n<br>" + heruntergeladenertextinhtml
+
+    # Compose email content
+    text = (
+        f"\n\n====================\n\n <br>Titel: {titeldesdokuments} \n\n<br>URL: "
+        f'<a href="{artikel}">{artikel}</a>'
+        f"\n\n <br>Länge: {laengetextstr} Wörter\n\n\n{zusammenfassung}\n\n <br>====================\n\n\n<br>{heruntergeladenertextinhtml}"
+    )
+    html = text  # HTML content is the same as text in this case
 
     part1 = MIMEText(text, "plain")
     part2 = MIMEText(html, "html")
     message.attach(part1)
     message.attach(part2)
 
-#absenden mail
+    # Send email
     context = ssl.create_default_context()
     with smtplib.SMTP(smtp_server, port) as server:
         server.starttls(context=context)
         server.login(sender_email, password)
         server.sendmail(sender_email, receiver_email, message.as_string())
     print("Mail gesendet")
-    
-#durchsuche Mail
+
+
+# Initialize WebDriver once
+driver_service = webdriver.FirefoxService(executable_path=geckodriver_path)
+driver = webdriver.Firefox(options=firefox_options, service=driver_service)
+driver.install_addon(addon_path1)
+driver.install_addon(addon_path2)
+
+# Process emails and extract links
 with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
     for nachricht in mailbox.fetch(bulk=True):
         emailinhalt = nachricht.text or nachricht.html
-        #mailbox.delete(nachricht.uid)
         mailbox.move(nachricht.uid, 'Archiv')
         print(emailinhalt)
-        #regex durchsucht inhalt der Mails nach URLs
+
+        # Extract URLs from email content
         regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
         matches = re.findall(regex, emailinhalt)
         print(matches)
-        #aktiviere pro Mail die Volltextmailingfunktion 
+
+        # Process each URL
         for m in matches:
             m = m.strip('<>')
-            getarticleandsendmail(m)
-        print("m erledigt")
-        sys.exit()
+            getarticleandsendmail(m, driver)
+        print("All links processed for this email.")
+
+# Quit WebDriver after processing all links
+driver.quit()
+print("WebDriver stopped.")
