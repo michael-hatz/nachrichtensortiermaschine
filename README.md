@@ -16,8 +16,8 @@ It's German for "news sorting machine"—and that's exactly what it does!
 ## Installation  
 Run:  
 ```bash
-docker pull mschfr/nachrichtensortiermaschine  
-docker run -d -p 5000:5000 --name nachrichtensortiermaschine -v myconfig:/app/data mschfr/nachrichtensortiermaschine:latest
+docker pull mschfr/nachrichtensortiermaschine:20250411  
+docker run -d -p 5000:5000 --name nachrichtensortiermaschine -v myconfig:/app/data mschfr/nachrichtensortiermaschine:20250411
 ```  
 Then, visit **127.0.0.1:5000** (or your custom IP) to access the management interface.  
 
