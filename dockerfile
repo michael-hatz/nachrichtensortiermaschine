@@ -102,9 +102,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt \
     && pip3 install Flask
 
 # Set up cron job to run nsm.py and pocket-ersatz.py every hour
-RUN echo "35 * * * * /usr/bin/python3 /app/nsm.py" > /etc/cron.d/nsm-cron \
-    && echo "45 * * * * /usr/bin/python3 /app/pocket-ersatz.py" >> /etc/cron.d/nsm-cron \
-    && echo "27 05 * * * /usr/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1" >> /etc/cron.d/nsm-cron \
+RUN echo "35 * * * * /usr/bin/env python3 /app/nsm.py" > /etc/cron.d/nsm-cron \
+    && echo "45 * * * * /usr/bin/env python3 /app/pocket-ersatz.py" >> /etc/cron.d/nsm-cron \
+    && echo "27 05 * * * /usr/bin/env python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1" >> /etc/cron.d/nsm-cron \
     && echo "0 04 * * * rm -r /tmp/*" >> /etc/cron.d/nsm-cron \
     && chmod 0644 /etc/cron.d/nsm-cron \
     && crontab /etc/cron.d/nsm-cron
