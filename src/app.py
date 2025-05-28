@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, jsonify
 import os
 import subprocess
 import configparser
@@ -18,7 +18,14 @@ def index():
     killfile_content = read_file('/app/data/killfile.txt')  # Added killfile handling
 
     # Read the crontab
-    crontab_content = subprocess.check_output(['crontab', '-l'], text=True)
+    try:
+        # Read the cron job file directly
+        with open('/etc/cron.d/myjobs', 'r') as f:
+            crontab_content = f.read()
+    except FileNotFoundError:
+        # Handle the case where the cron job file does not exist
+        crontab_content = "No cron jobs found."
+
     return render_template(
         'index.html',
         config=config_content,

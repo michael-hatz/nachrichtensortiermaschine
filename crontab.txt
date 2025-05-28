@@ -1,0 +1,5 @@
+58 * * * * root /usr/bin/python3 /app/nsm.py
+36 * * * * root /usr/bin/env python3 /app/pocket-ersatz.py
+27 05 * * * root /usr/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1
+0 4 * * * root rm -r /tmp/*
+

@@ -78,6 +78,22 @@ def filter_killfile(content, killfile):
     # Return the modified HTML as a string
     return str(soup)
 
+def preprocess_links(content):
+    """
+    Ensure spaces are preserved around <a> tags in the HTML content.
+    """
+    soup = BeautifulSoup(content, "html.parser")
+
+    for a_tag in soup.find_all("a"):
+        # Add a space before the link if not already present
+        if a_tag.previous_sibling and not str(a_tag.previous_sibling).endswith(" "):
+            a_tag.insert_before(" ")
+        # Add a space after the link if not already present
+        if a_tag.next_sibling and not str(a_tag.next_sibling).startswith(" "):
+            a_tag.insert_after(" ")
+
+    return str(soup)
+
 def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     # Load killfile and filter content
     killfile = load_killfile()
@@ -179,14 +195,14 @@ def full_text2(url, mailbox, seen_urls):
             print("new_data:" , new_data)                
             entry.content = [{'type': 'text/plain', 'language': None, 'base': '', 'value': 'Test'}]
             if entry.content is not None and not isinstance(entry.content, Exception):
-            # Code to execute if text_trafilatura is not None and not an error
                 h = trafilatura.extract(text_trafilatura, include_comments=False, include_links=True, include_formatting=True)              
                 if h is not None:
-                    entry.content = markdown.markdown(h)
-                    #entry.content.value = markdown.markdown(h)
-                    create_email(entry.link, entry.title, entry.content, mailbox)
+                    artikel_content = markdown.markdown(h)  # Convert to Markdown
+                    artikel_content = preprocess_links(artikel_content)  # Preprocess links
+                    create_email(entry.link, entry.title, artikel_content, mailbox)
                 else:
-                    print("h war leer")
+                    print(f"Content extraction failed for {entry.link}")
+                    create_email(entry.link, entry.title, "Content could not be extracted.", mailbox)
             else:
             # Code to execute if text_trafilatura is None or an error
                 print("Text konnte nicht abgerufen werden oder None")
@@ -212,22 +228,15 @@ def read_rss_feed(url, mailbox, seen_urls):
                 content = entry.content
                 if hasattr(content[0], 'value'):
                     content = content[0].value
-                    #print("hat content.value")
-
-
             else:
                 content = entry.summary
-            #print(entry)
+
             if hasattr(entry, 'media_content'):
                 x = entry.media_content[0]['url']
-                print("hat media_content")
                 content = content + '<br><br><img src="' + x + '" width="800">'
-                print(content)
-            if hasattr(entry, 'title'):
-                title = entry.title
-            else:
-                title = entry.link          
-                    
+            
+            content = preprocess_links(content)  # Preprocess links
+            title = getattr(entry, 'title', entry.link)
             create_email(entry.link, title, content, mailbox)
     seen_urls.to_csv(csv_file_path, sep='\t', index=False)
 

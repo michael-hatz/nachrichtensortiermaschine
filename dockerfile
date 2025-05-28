@@ -43,6 +43,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates
 
+# Install rsyslog for logging
+RUN apt-get update && apt-get install -y rsyslog
+RUN echo "cron.* /var/log/cron.log" >> /etc/rsyslog.d/50-default.conf
+
 # Copy the local Firefox installer into the container
 COPY src/files/firefox-134.0.2.tar.bz2 /tmp/firefox.tar.bz2
 
@@ -72,6 +76,8 @@ COPY src/nsm.py ./
 COPY src/pocket-ersatz.py ./
 COPY src/pocket-mailer.py ./
 COPY src/pocket-mailer-epub.py ./
+COPY src/app.py /app/
+COPY src/templates/ /app/templates/
 
 # Copy custom Firefox extensions into the container
 COPY src/files/istilldontcareaboutcookies-1.1.4.xpi ./
@@ -90,8 +96,6 @@ COPY src/config.cfg /app/data/
 COPY src/urls.tsv /app/data/
 COPY src/feeds.cfg /app/data/
 COPY src/filter.txt /app/data/
-
-# Copy killfile.txt to the container
 COPY src/killfile.txt /app/data/
 
 # Declare persistent volume
@@ -101,21 +105,19 @@ VOLUME ["/app/data"]
 RUN pip3 install --no-cache-dir -r requirements.txt \
     && pip3 install Flask
 
-# Set up cron job to run nsm.py and pocket-ersatz.py every hour
-RUN echo "35 * * * * /usr/bin/env python3 /app/nsm.py" > /etc/cron.d/nsm-cron \
-    && echo "45 * * * * /usr/bin/env python3 /app/pocket-ersatz.py" >> /etc/cron.d/nsm-cron \
-    && echo "27 05 * * * /usr/bin/env python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1" >> /etc/cron.d/nsm-cron \
-    && echo "0 04 * * * rm -r /tmp/*" >> /etc/cron.d/nsm-cron \
-    && chmod 0644 /etc/cron.d/nsm-cron \
-    && crontab /etc/cron.d/nsm-cron
 
-# Copy Flask app and templates
-COPY src/app.py /app/
-COPY src/templates/ /app/templates/
+# Install cron
+RUN apt-get update && apt-get install -y cron
 
-# Expose the web interface port
-EXPOSE 5000
+# Copy your cron jobs to /etc/cron.d/
+COPY crontab.txt /etc/cron.d/myjobs
+RUN chmod 0644 /etc/cron.d/myjobs
 
-# Start cron in the foreground and Flask app
-CMD ["sh", "-c", "cron && python3 /app/app.py"]
+# Create startup script to run cron and Flask app
+RUN echo '#!/bin/bash\n\
+python3 /app/app.py &\n\
+cron -f' > /start.sh && chmod +x /start.sh
+
+CMD ["/start.sh"]
+
 
