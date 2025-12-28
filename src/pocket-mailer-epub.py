@@ -36,7 +36,22 @@ password = mail_dict['SMTP']['password']
 dateiname = "Leseliste.epub"
 book = xml2epub.Epub("Leseliste", creator='Michael', language='de', publisher='Nachrichtensortiermaschine')
 
-###############################
+# Tolino-safe CSS (NO fixed sizes!)
+TOLINO_CSS = """
+<style type="text/css">
+html {
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    font-family: serif;
+    font-size: 1em;
+    line-height: 1.4;
+}
+p {
+    margin: 0 0 1em 0;
+}
+</style>
+"""
 
 def sendeanhang(to, subject, body, filename):
     """Send an email with the EPUB file as an attachment."""
@@ -72,7 +87,11 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
             try:
                 # Use BeautifulSoup to clean and extract text from HTML
                 soup = BeautifulSoup(nachricht.html, "html.parser")
-                emailinhalt = soup.get_text(separator="\n").strip()
+                emailinhalt = "\n\n".join(
+                    line.strip()
+                    for line in text.splitlines()
+                    if line.strip()
+                )
                 print(f"Extracted HTML content: {emailinhalt}")  # Debug: Log HTML content
             except Exception as e:
                 print(f"Error processing HTML content: {e}")
@@ -88,7 +107,13 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
             continue
 
         # Add the email content as a chapter to the EPUB
-        chapter = xml2epub.create_chapter_from_string(emailinhalt, title=nachricht.subject)
+        #chapter = xml2epub.create_chapter_from_string(emailinhalt, title=nachricht.subject)
+        chapter_html = TOLINO_CSS + emailinhalt
+
+        chapter = xml2epub.create_chapter_from_string(
+            chapter_html,
+            title=nachricht.subject
+        )
         book.add_chapter(chapter)
 
 # Create the EPUB file
