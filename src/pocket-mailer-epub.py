@@ -38,7 +38,6 @@ book = xml2epub.Epub("Leseliste", creator='Michael', language='de', publisher='N
 
 # Tolino-safe CSS (NO fixed sizes!)
 TOLINO_CSS = """
-<style type="text/css">
 html {
     -webkit-text-size-adjust: 100%;
 }
@@ -50,8 +49,28 @@ body {
 p {
     margin: 0 0 1em 0;
 }
-</style>
+img {
+    max-width: 100%;
+    height: auto;
+}
 """
+
+def create_valid_xhtml(content, title=""):
+    """Wrap content in valid XHTML with proper structure for EPUB."""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="de">
+<head>
+<meta charset="UTF-8" />
+<title>{title}</title>
+<style type="text/css">
+{TOLINO_CSS}
+</style>
+</head>
+<body>
+{content}
+</body>
+</html>"""
 
 def sendeanhang(to, subject, body, filename):
     """Send an email with the EPUB file as an attachment."""
@@ -87,6 +106,7 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
             try:
                 # Use BeautifulSoup to clean and extract text from HTML
                 soup = BeautifulSoup(nachricht.html, "html.parser")
+                text = soup.get_text(separator="\n").strip()
                 emailinhalt = "\n\n".join(
                     line.strip()
                     for line in text.splitlines()
@@ -107,14 +127,18 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
             continue
 
         # Add the email content as a chapter to the EPUB
-        #chapter = xml2epub.create_chapter_from_string(emailinhalt, title=nachricht.subject)
-        chapter_html = TOLINO_CSS + emailinhalt
+        chapter_html = create_valid_xhtml(emailinhalt, title=nachricht.subject)
 
-        chapter = xml2epub.create_chapter_from_string(
-            chapter_html,
-            title=nachricht.subject
-        )
-        book.add_chapter(chapter)
+        try:
+            chapter = xml2epub.create_chapter_from_string(
+                chapter_html,
+                title=nachricht.subject
+            )
+            book.add_chapter(chapter)
+        except (UnicodeEncodeError, Exception) as e:
+            # Skip chapters with problematic images (e.g., emoji in URLs) or other issues
+            print(f"Warning: Could not add chapter '{nachricht.subject}': {e}")
+            continue
 
 # Create the EPUB file
 path = os.getcwd()
