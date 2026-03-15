@@ -47,13 +47,11 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y rsyslog
 RUN echo "cron.* /var/log/cron.log" >> /etc/rsyslog.d/50-default.conf
 
-# Copy the local Firefox installer into the container
-COPY src/files/firefox-134.0.2.tar.bz2 /tmp/firefox.tar.bz2
-
-# Extract and install Firefox
-RUN tar -xjf /tmp/firefox.tar.bz2 -C /opt && \
+# Download the latest Firefox
+RUN wget -O /tmp/firefox.tar.xz "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US" && \
+    tar -xJf /tmp/firefox.tar.xz -C /opt && \
     ln -s /opt/firefox/firefox /usr/local/bin/firefox && \
-    rm /tmp/firefox.tar.bz2
+    rm /tmp/firefox.tar.xz
 
 # Install pip3 and selenium separately in another RUN command to catch any potential errors
 RUN python3 -m pip install --upgrade pip && \
