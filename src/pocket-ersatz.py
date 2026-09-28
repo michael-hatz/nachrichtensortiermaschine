@@ -1,17 +1,3 @@
-
-
-"""Der Ersatz für Pocket, Instapaper & Co: Sende eine Mail mit einem Link an eine E-Mail-Adresse und erhalte eine E-Mail mit dem Volltext des Links zurück. Auf Wunsch auch mit AI-gesteuerter Zusammenfassung und Verschlagwortung.
-
-Installation:
-* Installiert Python 3 und alle importierten Pakete
-* Ich benutze ein separates Postfach, an das ich die Mails sende. Es geht grundsätzlich auch mit einem Postfach. Dann könnt ihr den auszulesenden Ordner "INBOX" anpassen, aber dann müsst ihr herausfinden, wie man Mails automatisch in den entsprechenden Ordner sendet. Sollte mit Filterregeln gehen, aber das schränkt dann andere Mailarten ein. Stellt ihr etwa ein, dass alle Mails, welche von eurer eigenen Mailadresse stemmen, direkt in den auszulesenden Ordner sortiert werden, verhindert ihr z.B. dass ihr einfach hinter einer Paywall liegende Texte kopieren und an euch selbst mailen könnt
-* Oben die IMAP-Adresse und die Logindaten, die Empfängeradresse in die config.cfg eintragen
-* Wenn Ihr einen OpenAI-API-Schlüssel habt, dann tragt ihn ein. Auf die Weise bekommt ihr eine automatisierte Zusammenfassung mit Schlagwörtern. Ich für mich hab es deaktiviert, weil zu teuer
-* Nun einen Cronjob einrichten, welcher regelmäßig ausgeführt wird. Das Skript loggt sich dann in das Postfach ein, liest den Link, zieht den Volltext, erstellt eine AI-gestützte Zusammenfassung, verschlagwortet alles und sendet euch das alles per Mail an die gewählte Adresse ein
-* Bei mir läuft das Skript alle 0 Minuten, was den Traffic etwas begrenzt und da es sich um ein "SpäterLesen"-Skript handelt, ist Hektik hier auch absolut nicht angebracht.
-* Wenn man die Skripte auf einem Raspberry Pi laufen lässt, bitte alle Anleitungen im Internet ignorieren, die einen anweisen den Cronjob mit "sudo crontab -e" einzurichten. Auf die Weise würde das Skript als root laufen, was aber nicht klappen wird. "crontab -e" lässt das Skript auf dem aktuellen User laufen, was korrekt ist.
-"""
-
 import configparser
 import smtplib
 import ssl
@@ -32,7 +18,6 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 import time
 import sys
 

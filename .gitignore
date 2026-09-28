@@ -1,0 +1,13 @@
+experiments/app-withwizard.py
+experiments/killfile.html
+experiments/testmail.py
+experiments/wizard_step1.html
+experiments/wizard_step2.html
+experiments/wizard_step3.html
+experiments/wizard_step4.html
+src/app-withwizard.py
+src/testmail.py
+experiments/killfile.py
+
+# local test data with real credentials
+testdata/

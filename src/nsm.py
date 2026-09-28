@@ -261,22 +261,24 @@ def errormailer(textexception):
 
 
 def main():
-    
     for section in feedliste.sections():
         seen_urls = pd.read_csv(csv_file_path, sep='\t')
         section_dict = dict(feedliste[section])
-        #print(section_dict['fulltext'])
-        print(section_dict['imap-mailbox'])
-        if section_dict['active'] != "False":
-            if section_dict['fulltext'] == "True":
-                full_text2(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
+        try:
+            print(section_dict['imap-mailbox'])
+            if section_dict['active'] != "False":
+                if section_dict['fulltext'] == "True":
+                    full_text2(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
+                else:
+                    read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
+                mailsort(section_dict['imap-mailbox'])
+                mailchecker(section_dict['imap-mailbox'])
             else:
-                read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
-            mailsort(section_dict['imap-mailbox'])
-            mailchecker(section_dict['imap-mailbox'])
-        else:
-            pass    
-    
+                pass    
+        except Exception as e:
+            print(f"Error in section: {section}")
+            e_str = f"Error in feed section: {section}\nFeed URL: {section_dict.get('url', 'N/A')}\nException: {str(e)}"
+            errormailer(e_str)
     print("Fertig")
         
 if __name__ == "__main__":
@@ -287,25 +289,3 @@ if __name__ == "__main__":
         e = str(e)
         errormailer(e)
 
-
-"""
-#2024-01-01 Aktueller Stand: 
-
-
-Bugs:
-    * bestimmte Spezialfeeds wie der von Mastodon gehen aktuell nur begrenzt. Ursache dafür ist, dass diese Feeds arg merkwürdig zusammengesetzt sind
-    * aktuell: Ist größtenteils gefixt, außer wie bei Verrückte Geschichte, wenn Bildbeschreibung und Text und Bild zusammenkommen
-    
-To Do:
-    * prints aufräumen,
-
-Ideen:
-     * backup aller Links in die Wayback Machine von Archive.org
-     * Summary
-     * Tags?
-     * verbessere print-statements
-     * Idee: Option für Bilder
-     * Filterfunktion verbessern
-     * Support von externen Filterlisten wie uBlock sie hat
-     * Filtern der Feeds auf der Basis des Headers, so dass man das auch in normalen Postfächern nutzen kann            
-     """

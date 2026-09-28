@@ -37,22 +37,59 @@ def index():
 
 @app.route('/', methods=['POST'])
 def save():
-    # Get the new content from the forms and save them
-    config_content = request.form.get('config', '')  # Use .get() to avoid KeyError
+    # Get the new content from the forms
+    config_content = request.form.get('config', '')
     feeds_content = request.form.get('feeds', '')
     filter_content = request.form.get('filter', '')
-    killfile_content = request.form.get('killfile', '')  # Added killfile handling
+    killfile_content = request.form.get('killfile', '')
+    crontab_content = request.form.get('crontab', '').replace('\r\n', '\n').replace('\r', '\n')
 
-    write_file('/app/data/config.cfg', config_content)
-    write_file('/app/data/feeds.cfg', feeds_content)
-    write_file('/app/data/filter.txt', filter_content)
-    write_file('/app/data/killfile.txt', killfile_content)  # Save killfile content
+    # Helper to normalize line endings for comparison
+    def normalize(content):
+        return content.replace('\r\n', '\n').replace('\r', '\n')
 
-    # Save the crontab
-    crontab_content = request.form.get('crontab', '')
-    with open('/tmp/crontab', 'w') as crontab_file:
-        crontab_file.write(crontab_content)
-    subprocess.run(['crontab', '/tmp/crontab'])
+    # Save config.cfg if changed
+    try:
+        current_config = normalize(read_file('/app/data/config.cfg'))
+    except FileNotFoundError:
+        current_config = ""
+    if current_config != normalize(config_content):
+        write_file('/app/data/config.cfg', config_content)
+
+    # Save feeds.cfg if changed
+    try:
+        current_feeds = normalize(read_file('/app/data/feeds.cfg'))
+    except FileNotFoundError:
+        current_feeds = ""
+    if current_feeds != normalize(feeds_content):
+        write_file('/app/data/feeds.cfg', feeds_content)
+
+    # Save filter.txt if changed
+    try:
+        current_filter = normalize(read_file('/app/data/filter.txt'))
+    except FileNotFoundError:
+        current_filter = ""
+    if current_filter != normalize(filter_content):
+        write_file('/app/data/filter.txt', filter_content)
+
+    # Save killfile.txt if changed
+    try:
+        current_killfile = normalize(read_file('/app/data/killfile.txt'))
+    except FileNotFoundError:
+        current_killfile = ""
+    if current_killfile != normalize(killfile_content):
+        write_file('/app/data/killfile.txt', killfile_content)
+
+    # Save crontab if changed
+    try:
+        with open('/etc/cron.d/myjobs', 'r') as f:
+            current_crontab = normalize(f.read())
+    except FileNotFoundError:
+        current_crontab = ""
+    if current_crontab != crontab_content:
+        with open('/etc/cron.d/myjobs', 'w') as crontab_file:
+            crontab_file.write(crontab_content)
+        os.chmod('/etc/cron.d/myjobs', 0o644)  # Ensure correct permissions
 
     return "Changes saved!"
 
