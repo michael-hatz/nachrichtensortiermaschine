@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 #-*- coding: utf-8 -*-
 
-import markdownify
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase

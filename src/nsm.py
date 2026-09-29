@@ -64,16 +64,17 @@ def filter_killfile(content, killfile):
 
     # Iterate over all text nodes in the HTML
     for text_node in soup.find_all(string=True):
-        # Normalize the text node
-        text = text_node.strip()
+        # Keep surrounding whitespace, otherwise spaces around links get lost
+        text = str(text_node)
         for phrase in killfile:
             # Normalize the killfile phrase
             normalized_phrase = phrase.strip()
             # Remove the killfile phrase from the text node
-            if normalized_phrase in text:
+            if normalized_phrase and normalized_phrase in text:
                 text = text.replace(normalized_phrase, "")
-        # Update the text node with the filtered text
-        text_node.replace_with(text)
+        # Only touch nodes that actually changed
+        if text != text_node:
+            text_node.replace_with(text)
 
     # Return the modified HTML as a string
     return str(soup)
@@ -85,11 +86,13 @@ def preprocess_links(content):
     soup = BeautifulSoup(content, "html.parser")
 
     for a_tag in soup.find_all("a"):
-        # Add a space before the link if not already present
-        if a_tag.previous_sibling and not str(a_tag.previous_sibling).endswith(" "):
+        # Add a space before the link if a word runs directly into it
+        before = a_tag.previous_sibling
+        if isinstance(before, str) and before and before[-1].isalnum():
             a_tag.insert_before(" ")
-        # Add a space after the link if not already present
-        if a_tag.next_sibling and not str(a_tag.next_sibling).startswith(" "):
+        # Add a space after the link if a word runs directly into it (not before punctuation)
+        after = a_tag.next_sibling
+        if isinstance(after, str) and after and after[0].isalnum():
             a_tag.insert_after(" ")
 
     return str(soup)

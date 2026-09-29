@@ -328,7 +328,12 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
             try:
                 # Use BeautifulSoup to clean and extract text from HTML
                 soup = BeautifulSoup(nachricht.html, "html.parser")
-                text = soup.get_text(separator="\n").strip()
+                # Line breaks only after block elements, so inline links stay inside their paragraph
+                for br in soup.find_all("br"):
+                    br.replace_with("\n")
+                for block in soup.find_all(["p", "div", "li", "blockquote", "tr", "h1", "h2", "h3", "h4", "h5", "h6"]):
+                    block.append("\n")
+                text = soup.get_text().strip()
                 emailinhalt = "\n\n".join(
                     line.strip()
                     for line in text.splitlines()

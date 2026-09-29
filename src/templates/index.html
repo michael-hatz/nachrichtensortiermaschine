@@ -1077,11 +1077,16 @@ Currently not functional</pre>
             })
             .then(response => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                return response.text();
+                return response.json();
             })
-            .then(() => {
+            .then(result => {
                 dirty = false;
                 setSaveState('saved', 'All changes saved');
+                if (result.created_folders.length) {
+                    toast('Created mail folders: ' + result.created_folders.join(', '));
+                    result.created_folders.forEach(name => folderList.append(el('option', { value: name })));
+                }
+                if (result.folder_error) toast('Could not create missing mail folders: ' + result.folder_error, 'error');
                 setTimeout(() => { if (!dirty) setSaveState('clean', 'No unsaved changes'); }, 3000);
             })
             .catch(error => {

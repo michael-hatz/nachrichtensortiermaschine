@@ -69,8 +69,10 @@ def save():
         current_feeds = normalize(read_file('/app/data/feeds.cfg'))
     except FileNotFoundError:
         current_feeds = ""
+    created_folders, folder_error = [], None
     if current_feeds != normalize(feeds_content):
         write_file('/app/data/feeds.cfg', feeds_content)
+        created_folders, folder_error = create_missing_feed_folders()
 
     # Save filter.txt if changed
     try:
@@ -99,7 +101,7 @@ def save():
             crontab_file.write(crontab_content)
         os.chmod('/etc/cron.d/myjobs', 0o644)  # Ensure correct permissions
 
-    return "Changes saved!"
+    return jsonify({'created_folders': created_folders, 'folder_error': folder_error})
 
 @app.route('/fetch-feeds', methods=['POST'])
 def fetch_feeds():
@@ -147,6 +149,31 @@ def download_txt():
 def download_epub():
     return generate_download('/app/pocket-mailer-epub.py', 'Leseliste.epub',
                              f"Leseliste-{date.today():%Y%m%d}.epub", 'application/epub+zip')
+
+def create_missing_feed_folders():
+    """Create the IMAP folders referenced by imap-mailbox in feeds.cfg that don't exist yet.
+
+    Returns (created folder names, error message or None). A failing IMAP connection
+    must not break saving, so errors are reported instead of raised.
+    """
+    feeds = configparser.ConfigParser()
+    feeds.read('/app/data/feeds.cfg', encoding='utf-8')
+    wanted = {feeds[section].get('imap-mailbox', 'INBOX').strip() for section in feeds.sections()}
+    wanted.discard('')
+    config = configparser.ConfigParser()
+    config.read('/app/data/config.cfg')
+    created = []
+    try:
+        imap = config['IMAP']
+        with MailBox(imap['imapHost'], timeout=15).login(imap['imapUser'], imap['imapPasscode'], initial_folder=None) as mailbox:
+            existing = {folder.name for folder in mailbox.folder.list()}
+            for name in sorted(wanted - existing):
+                mailbox.folder.create(name)
+                mailbox.folder.subscribe(name, True)
+                created.append(name)
+    except Exception as e:
+        return created, str(e)
+    return created, None
 
 @app.route('/api/folders', methods=['GET'])
 def list_folders():
@@ -275,10 +302,18 @@ def import_opml():
             print(f"Error writing to feeds.cfg: {e}")
             return "Error updating feeds.cfg", 500
 
+        created_folders, folder_error = create_missing_feed_folders()
+        folder_note = ""
+        if created_folders:
+            folder_note = f" Created mail folders: {', '.join(created_folders)}"
+        elif folder_error:
+            folder_note = f" Could not check mail folders: {folder_error}"
+
         # Provide feedback to the user
         return (
             f"OPML imported successfully! "
             f"Added: {len(added_feeds)}, Updated: {len(updated_feeds)}, Skipped: {len(skipped_feeds)}"
+            f"{folder_note}"
         )
 
 def read_file(file_path):
