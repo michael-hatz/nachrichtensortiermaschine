@@ -4,6 +4,7 @@ requests
 trafilatura
 beautifulsoup4
 markdown
+nh3
 lxml_html_clean
 selenium
 openai

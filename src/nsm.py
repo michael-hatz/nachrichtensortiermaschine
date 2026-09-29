@@ -21,6 +21,8 @@ import markdown
 import signal
 import traceback
 import html as html_lib
+from urllib.parse import urlparse
+import nh3
 
 
 #global values
@@ -225,43 +227,65 @@ def preprocess_links(content):
 
     return str(soup)
 
+class MailSendError(Exception):
+    """The mail server couldn't be reached or refused the mail; the article itself is fine."""
+
+
+def is_http_url(url):
+    return urlparse(url).scheme.lower() in ("http", "https")
+
+
+def sanitize_html(content):
+    """Remove scripts, event handlers, non-http(s) links and tracking pixels from HTML
+    that comes from feeds or web pages."""
+    content = nh3.clean(content, url_schemes={"http", "https", "mailto"},
+                        link_rel="noopener noreferrer")
+    soup = BeautifulSoup(content, "html.parser")
+    for img in soup.find_all("img"):
+        if img.get("width") in ("0", "1") or img.get("height") in ("0", "1"):
+            img.decompose()
+    return str(soup)
+
+
+def html_to_text(content):
+    """Plain text version of the HTML: line breaks only at <br> and between block elements."""
+    soup = BeautifulSoup(content, "html.parser")
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for block in soup.find_all(BLOCK_TAGS):
+        block.insert_after("\n\n")
+    lines = [" ".join(line.split()) for line in soup.get_text().splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
-    # Load killfile and filter content
+    # Content comes from feeds/web pages: sanitize first, then filter the killfile phrases
+    artikel_content = sanitize_html(artikel_content)
     killfile = load_killfile()
     artikel_content = filter_killfile(artikel_content, killfile)
 
     # Define the email message
+    artikel_titel = " ".join(str(artikel_titel or "").split()) or "Kein Titel"
     message = MIMEMultipart("alternative")
-    try:
-        message["Subject"] = artikel_titel
-    except AttributeError:
-        artikel_titel = "Kein Titel"
-        message["Subject"] = artikel_url
-
+    message["Subject"] = artikel_titel
     message["From"] = sender_email
     message["To"] = receiver_email
 
-    text = artikel_content
-    html = artikel_content
-
-    # Calculate length
-    html = str(html)
-    text = str(text)
-    laengetext = len(html.split())
-    laengetextstr = str(laengetext)
+    plain_content = html_to_text(artikel_content)
+    laengetext = len(plain_content.split())
 
     # Build HTML email
+    titel_html = html_lib.escape(artikel_titel)
+    url_html = html_lib.escape(artikel_url)
+    if is_http_url(artikel_url):
+        url_html = f'<a href="{url_html}">{url_html}</a>'
     html = (
-        f"\n\n====================\n\n<br>Titel: {artikel_titel} \n\n<br>URL: "
-        f'<a href="{artikel_url}">{artikel_url}</a>'
-        f"\n\n <br>Länge: {laengetextstr} Wörter\n\n\n"
-        f"\n\n<br> ====================\n\n\n<br>{html}"
+        f"====================<br>\nTitel: {titel_html}<br>\nURL: {url_html}<br>\n"
+        f"Länge: {laengetext} Wörter<br>\n====================<br>\n{artikel_content}"
     )
     text = (
-        f"\n\n====================\n\n<br>Titel: {artikel_titel} \n\n<br>URL: "
-        f'<a href="{artikel_url}">{artikel_url}</a>'
-        f"\n\n <br>Länge: {laengetextstr} Wörter\n\n\n"
-        f"\n\n<br> ====================\n\n\n<br>{text}"
+        f"====================\nTitel: {artikel_titel}\nURL: {artikel_url}\n"
+        f"Länge: {laengetext} Wörter\n====================\n\n{plain_content}"
     )
 
     # Attach parts
@@ -273,10 +297,13 @@ def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     # Add header and send email
     message["X-Special-Header"] = mailbox
     context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
-        server.starttls(context=context)
-        server.login(sender_email, password)
-        server.sendmail(sender_email, receiver_email, message.as_string())
+    try:
+        with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
+            server.starttls(context=context)
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, message.as_string())
+    except (smtplib.SMTPException, OSError) as e:
+        raise MailSendError(f"Mail could not be sent: {e}") from e
 
 def mailsort(header):
     time.sleep(10) #ist hier, damit die Mails Zeit haben anzukommen 
@@ -284,9 +311,10 @@ def mailsort(header):
     # nur mails mit special header suchen
         emails_with_special_header = mailbox.fetch(A(header=[H("X-Special-Header" , value=header)]), charset='utf-8', bulk=True, mark_seen=False)
 
-        # Print the subject of matching emails
+        # IMAP HEADER search matches substrings ("News" also finds "News-Tech"), so compare exactly
         for email in emails_with_special_header:
-            mailbox.move(email.uid, header)   
+            if header in (value.strip() for value in email.headers.get("x-special-header", ())):
+                mailbox.move(email.uid, header)
 
 def mailchecker(Eingangsordner):
     #öffne Filterliste
@@ -383,6 +411,9 @@ def process_entries(feed, url, db, send_entry):
             # the article that hangs would otherwise time out the feed on every run
             mark_seen(db, url, [entry.link])
             raise FeedTimeout(f"Feed took longer than {FEED_TIMEOUT} seconds, stopped at article {entry.link}")
+        except MailSendError:
+            # not the article's fault: keep it unseen so it is sent on the next run
+            raise
         except Exception as e:
             print(f"Error in entry {entry.link}: {e}")
             failed.append((entry.link, traceback.format_exc()))
@@ -418,7 +449,10 @@ def fetch_article(url):
         target = find_page_redirect(html) if html else None
         if not target:
             break
-        url = requests.compat.urljoin(url, target)
+        target = requests.compat.urljoin(url, target)
+        if not is_http_url(target):
+            break
+        url = target
         html = trafilatura.fetch_url(url)
     return html, url
 
@@ -447,7 +481,8 @@ def read_rss_feed(url, mailbox, db):
 
         if entry.get('media_content') and entry.media_content[0].get('url'):
             x = entry.media_content[0]['url']
-            content = content + '<br><br><img src="' + x + '" width="800">'
+            if is_http_url(x):
+                content = content + f'<br><br><img src="{html_lib.escape(x)}" width="800">'
 
         content = preprocess_links(content)  # Preprocess links
         title = entry.get('title', entry.link)
