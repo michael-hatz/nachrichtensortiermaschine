@@ -55,10 +55,15 @@ firefox_options.add_argument("--purgecaches")
 firefox_options.add_argument('--disable-dev-shm-usage')
 firefox_options.binary_location = "/usr/local/bin/firefox"
 
-driver_service = webdriver.FirefoxService(executable_path=geckodriver_path)
-driver = webdriver.Firefox(options=firefox_options, service=driver_service)
-driver.install_addon(addon_path1)
-driver.install_addon(addon_path2)
+driver = None
+
+def start_driver():
+    driver_service = webdriver.FirefoxService(executable_path=geckodriver_path)
+    d = webdriver.Firefox(options=firefox_options, service=driver_service)
+    d.set_page_load_timeout(60)
+    d.install_addon(addon_path1)
+    d.install_addon(addon_path2)
+    return d
 
 
 
@@ -84,7 +89,6 @@ def getarticleandsendmail(artikel):
     #print("zeile 92")
     titeldesdokuments = driver.title
     #print("zeile 94")
-    driver.quit()
     ## 20.12.22: Hier hackt es gerade leicht, da Trafilatura eben einen extrahierten text liefert
     
     heruntergeladenertextinhtml = markdown.markdown(h)
@@ -130,19 +134,30 @@ def getarticleandsendmail(artikel):
     print("Mail gesendet")
     
 #durchsuche Mail
-with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
-    for nachricht in mailbox.fetch(bulk=True):
-        emailinhalt = nachricht.text or nachricht.html
-        #mailbox.delete(nachricht.uid)
-        mailbox.move(nachricht.uid, 'Archiv')
-        print(emailinhalt)
-        #regex durchsucht inhalt der Mails nach URLs
-        regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
-        matches = re.findall(regex, emailinhalt)
-        print(matches)
-        #aktiviere pro Mail die Volltextmailingfunktion 
-        for m in matches:
-            m = m.strip('<>')
-            getarticleandsendmail(m)
-        print("m erledigt")
-        sys.exit()
+try:
+    with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
+        for nachricht in mailbox.fetch(bulk=True):
+            emailinhalt = nachricht.text or nachricht.html
+            #mailbox.delete(nachricht.uid)
+            mailbox.move(nachricht.uid, 'Archiv')
+            print(emailinhalt)
+            #regex durchsucht inhalt der Mails nach URLs
+            regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
+            matches = re.findall(regex, emailinhalt)
+            print(matches)
+            #aktiviere pro Mail die Volltextmailingfunktion 
+            for m in matches:
+                m = m.strip('<>')
+                # Firefox erst starten, wenn es wirklich etwas zu laden gibt
+                if driver is None:
+                    driver = start_driver()
+                try:
+                    getarticleandsendmail(m)
+                except Exception as e:
+                    print("Fehler bei " + m + ": " + str(e))
+            print("m erledigt")
+            sys.exit()
+finally:
+    # Firefox + geckodriver immer beenden, auch bei Fehlern oder sys.exit()
+    if driver is not None:
+        driver.quit()

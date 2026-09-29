@@ -2,7 +2,6 @@
 36 * * * * root /usr/bin/env python3 /app/pocket-ersatz.py;
 27 05 * * * root /usr/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1;
 0 4 * * * root rm -r /tmp/*;
-15 * * * * root pkill firefox-bin;
-15 * * * * root pkill -f WebExtensions;
-15 * * * * root pkill -f "Web Content";
+15 * * * * root pkill -f /usr/local/bin/geckodriver;
+15 * * * * root pkill -f /opt/firefox/;
 

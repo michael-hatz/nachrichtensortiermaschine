@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     sudo \
     pandoc \
     fonts-dejavu-core \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Install necessary dependencies
@@ -115,8 +116,10 @@ RUN chmod 0644 /etc/cron.d/myjobs
 # Create startup script to run cron and Flask app
 RUN echo '#!/bin/bash\n\
 python3 /app/app.py &\n\
-cron -f' > /start.sh && chmod +x /start.sh
+exec cron -f' > /start.sh && chmod +x /start.sh
 
+# tini als PID 1 räumt verwaiste Prozesse (z.B. Firefox-Kinder) ab
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/start.sh"]
 
 
