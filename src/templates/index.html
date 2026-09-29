@@ -3,198 +3,493 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>Nachrichtensortiermaschine</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f5fbf'/%3E%3Cpath d='M8 11h16M8 16h16M8 21h10' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
     <style>
-        /* Basic Styling */
+        /* ---------- Design tokens ---------- */
+        :root {
+            --bg: #f3f5f8;
+            --surface: #ffffff;
+            --surface-2: #f7f9fb;
+            --border: #e1e5eb;
+            --border-strong: #c9d0da;
+            --text: #1d2530;
+            --muted: #6a7482;
+            --accent: #1f5fbf;
+            --accent-hover: #194f9f;
+            --accent-soft: #e8f0fb;
+            --accent-soft-hover: #d6e4f7;
+            --on-accent: #ffffff;
+            --danger: #c0262d;
+            --danger-soft: #fcebec;
+            --success: #1e7b3c;
+            --success-soft: #e6f4ea;
+            --warn: #a15c00;
+            --warn-soft: #fff4e0;
+            --focus: 0 0 0 3px rgba(31, 95, 191, .28);
+            --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+            --shadow: 0 1px 3px rgba(16, 24, 40, .08), 0 4px 16px rgba(16, 24, 40, .06);
+            --radius: 10px;
+            --radius-sm: 6px;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #12161c;
+                --surface: #1a1f27;
+                --surface-2: #20262f;
+                --border: #2c333d;
+                --border-strong: #3b4450;
+                --text: #e4e8ee;
+                --muted: #939cab;
+                --accent: #5b9bf0;
+                --accent-hover: #7cafF3;
+                --accent-soft: #1f2e45;
+                --accent-soft-hover: #273a57;
+                --on-accent: #0d1522;
+                --danger: #f07178;
+                --danger-soft: #3a2024;
+                --success: #6fcf8e;
+                --success-soft: #1b3325;
+                --warn: #f0b35b;
+                --warn-soft: #3a2e1a;
+                --focus: 0 0 0 3px rgba(91, 155, 240, .35);
+                --shadow-sm: none;
+                --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+            }
+        }
+
+        /* ---------- Base ---------- */
+        *, *::before, *::after { box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f9f9f9;
-            color: #333;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.5;
+            background: var(--bg);
+            color: var(--text);
             margin: 0;
-            padding: 0;
+            -webkit-font-smoothing: antialiased;
         }
-        h1 {
-            text-align: center;
-            color: #0056b3;
-            margin-top: 20px;
-        }
+        a { color: var(--accent); }
+        h2 { font-size: 1.3rem; font-weight: 650; letter-spacing: -.01em; }
+        h3 { font-size: 1.05rem; font-weight: 650; margin: 1.8em 0 .5em; }
+        h4 { font-size: .95rem; font-weight: 600; margin: 1.2em 0 .3em; }
+        input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; vertical-align: middle; cursor: pointer; }
+        [hidden] { display: none !important; }
 
-        /* Tabs Layout */
-        .tabs {
-            display: flex;
-            justify-content: center;
-            margin-top: 20px;
-            border-bottom: 2px solid #ddd;
+        /* ---------- Header & tabs ---------- */
+        .site-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
+        .container { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+        .brand { display: flex; align-items: center; gap: 12px; padding: 16px 0 10px; }
+        .brand-mark {
+            width: 36px; height: 36px; border-radius: 9px; flex: none;
+            background: var(--accent); color: var(--on-accent);
+            display: grid; place-items: center;
+        }
+        .brand h1 { font-size: 1.15rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+        .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+        .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 0 -8px; }
+        .tabs::-webkit-scrollbar { display: none; }
         .tab {
-            padding: 15px 25px;
-            cursor: pointer;
-            background-color: #f1f1f1;
-            border: 1px solid #ccc;
-            margin: 0 5px;
-            border-radius: 5px 5px 0 0;
-            transition: background-color 0.3s ease;
+            appearance: none; background: none; border: none; margin: 0;
+            padding: 10px 12px 12px; font: inherit; font-size: 14px; font-weight: 500;
+            color: var(--muted); cursor: pointer; white-space: nowrap;
+            border-bottom: 2px solid transparent; border-radius: 0;
+            transition: color .15s, border-color .15s;
         }
-        .tab:hover {
-            background-color: #e0e0e0;
-        }
-        .tab.active {
-            background-color: #0056b3;
-            color: white;
-            font-weight: bold;
-        }
+        .tab:hover { color: var(--text); background: none; }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: none; }
+        .tab:focus-visible { outline: none; box-shadow: inset var(--focus); border-radius: var(--radius-sm); }
 
-        /* Tab Content */
+        /* ---------- Panels ---------- */
+        main.container { padding-top: 24px; padding-bottom: 24px; }
         .tab-content {
             display: none;
-            padding: 20px;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            border-top: none;
-            border-radius: 0 0 5px 5px;
-            margin-top: -1px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            padding: 22px 24px 26px;
         }
-        .tab-content.active {
-            display: block;
+        .tab-content.active { display: block; animation: fade-in .18s ease-out; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+        .tab-header {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; flex-wrap: wrap;
+            padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--border);
         }
+        .tab-header h2 { margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .filename {
+            font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--muted);
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
+        }
+        .raw-toggle { font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 8px; }
+        .raw-toggle:hover { color: var(--text); }
 
-        /* Textarea Styling */
+        /* ---------- Form controls ---------- */
+        textarea, input[type="text"], input[type="password"], input[type="url"], input[type="search"] {
+            font: inherit;
+            color: var(--text);
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            transition: border-color .15s, box-shadow .15s;
+        }
+        textarea:focus, input[type="text"]:focus, input[type="password"]:focus, input[type="url"]:focus, input[type="search"]:focus {
+            outline: none; border-color: var(--accent); box-shadow: var(--focus);
+        }
         textarea {
             width: 100%;
-            height: 400px;
-            font-family: monospace;
-            font-size: 14px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            box-sizing: border-box;
-            resize: none;
-            background-color: #f9f9f9;
+            height: 420px;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 12px 14px;
+            resize: vertical;
+            background: var(--surface-2);
+            tab-size: 4;
         }
 
-        /* Button */
-        button {
-            background-color: #0056b3;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 5px;
-            transition: background-color 0.3s ease;
-            display: block;
-            margin: 20px auto;
+        /* ---------- Buttons ---------- */
+        button, .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            font: inherit; font-size: 14px; font-weight: 550; line-height: 1.2;
+            background: var(--accent); color: var(--on-accent);
+            border: 1px solid transparent; border-radius: var(--radius-sm);
+            padding: 8px 16px; margin: 0; cursor: pointer; white-space: nowrap;
+            transition: background-color .15s, color .15s, box-shadow .15s, opacity .15s;
         }
-        button:hover {
-            background-color: #004494;
+        button:hover, .btn:hover { background: var(--accent-hover); }
+        button:focus-visible, .btn:focus-visible, .btn:focus-within { outline: none; box-shadow: var(--focus); }
+        button:disabled { opacity: .6; cursor: progress; }
+        button.secondary, .btn.secondary { background: var(--accent-soft); color: var(--accent); }
+        button.secondary:hover, .btn.secondary:hover { background: var(--accent-soft-hover); }
+        button.ghost { background: transparent; color: var(--muted); border-color: var(--border-strong); }
+        button.ghost:hover { background: var(--surface-2); color: var(--text); }
+        button.danger { background: transparent; color: var(--muted); padding: 6px 9px; }
+        button.danger:hover { background: var(--danger-soft); color: var(--danger); }
+        button.busy::before {
+            content: ""; width: 13px; height: 13px; border-radius: 50%;
+            border: 2px solid currentColor; border-right-color: transparent;
+            animation: spin .7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ---------- Editor GUI (feeds, config, filter, killfile) ---------- */
+        .gui input[type="text"], .gui input[type="password"], .gui input[type="url"], .gui input[type="search"] {
+            width: 100%; padding: 7px 10px; font-size: 14px;
+        }
+        .gui .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 75ch; }
+        .gui .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+        .gui .toolbar input[type="search"], .gui .toolbar input[type="text"] { flex: 1; min-width: 180px; width: auto; }
+        .gui .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+        .gui input[type="search"] {
+            padding-left: 34px;
+            background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238a93a0' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px center;
         }
 
-        /* Footer */
-        footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 14px;
+        /* Feeds */
+        .feed-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+        .feed-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .feed-table th {
+            text-align: left; color: var(--muted); font-size: 12px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: .04em;
+            padding: 9px 8px; background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap;
         }
-        footer a {
-            text-decoration: none;
-            color: #0066cc;
+        .feed-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .feed-table tbody tr:last-child td { border-bottom: none; }
+        .feed-table tbody tr:hover { background: var(--surface-2); }
+        .feed-table td.center, .feed-table th.center { text-align: center; }
+        .feed-table col.c-name { width: 20%; }
+        .feed-table col.c-url { width: 45%; }
+        .feed-table col.c-folder { width: 20%; }
+        /* table inputs look like plain text until hovered or focused */
+        .gui .feed-table input[type="text"], .gui .feed-table input[type="url"] {
+            min-width: 120px; border-color: transparent; background: transparent; padding: 6px 8px;
         }
+        .gui .feed-table tr:hover input[type="text"], .gui .feed-table tr:hover input[type="url"] { border-color: var(--border-strong); background: var(--surface); }
+        .gui .feed-table input:focus { border-color: var(--accent) !important; background: var(--surface) !important; }
+        .feed-table td:nth-child(3) input { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+        .feed-table tr.paused td input[type="text"], .feed-table tr.paused td input[type="url"] { color: var(--muted); opacity: .6; text-decoration: line-through; text-decoration-color: var(--border-strong); }
+        .empty-row td { text-align: center; color: var(--muted); padding: 28px; }
+        .add-feed {
+            background: var(--accent-soft); border: 1px solid var(--accent-soft-hover);
+            border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+        }
+        .add-feed .grid { display: grid; grid-template-columns: 1fr 2fr 1fr auto auto; gap: 10px; align-items: end; }
+        .add-feed label { font-size: 12.5px; font-weight: 550; color: var(--muted); display: block; margin-bottom: 4px; }
+        .add-feed .check { height: 36px; display: flex; align-items: center; justify-content: center; }
+        .add-feed .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+        .add-feed .error:empty { display: none; }
 
-        .script-buttons {
-            text-align: center;
-            margin: 20px 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
-        }
-        .script-buttons h2 {
-            color: #0056b3;
-            margin-bottom: 15px;
-        }
-        .script-buttons button {
-            display: inline-block;
-            margin: 5px;
-            background-color: #0056b3;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 5px;
-            transition: background-color 0.3s ease;
-        }
-        .script-buttons button:hover {
-            background-color: #004494;
-        }
-        .file-upload {
-            display: inline-block;
-            margin: 10px;
-        }
-        #actions .script-buttons {
-            background-color: transparent;
-            padding: 0;
-        }
+        /* Toggle switch */
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; vertical-align: middle; flex: none; }
+        .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .switch span { position: absolute; inset: 0; background: var(--border-strong); border-radius: 20px; transition: .2s; cursor: pointer; }
+        .switch span::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+        .switch input:checked + span { background: var(--success); }
+        .switch input:checked + span::before { transform: translateX(14px); }
+        .switch input:focus-visible + span { box-shadow: var(--focus); }
+        .raw-toggle .switch input:checked + span { background: var(--accent); }
 
+        /* Config */
+        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px; align-items: start; }
+        .config-section {
+            border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 0 16px 12px; margin: 0; min-width: 0; background: var(--surface);
+        }
+        .config-section legend {
+            float: left; width: calc(100% + 32px); margin: 0 -16px 12px;
+            padding: 10px 16px; font-weight: 650; font-size: 14px;
+            background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0;
+        }
+        .config-section legend + * { clear: both; }
+        .config-section .hint { margin-bottom: 10px; }
+        .config-row { display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: center; margin: 8px 0; }
+        .config-row label { font-size: 13.5px; color: var(--muted); word-break: break-word; }
+        .secret { display: flex; gap: 6px; }
+        .secret button { min-width: 64px; }
+
+        /* Filter chips */
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+        .chip {
+            display: inline-flex; align-items: center; gap: 2px;
+            background: var(--accent-soft); color: var(--accent);
+            border: 1px solid var(--accent-soft-hover); border-radius: 999px;
+            padding: 3px 3px 3px 12px; font-size: 14px; font-weight: 500;
+        }
+        .chip button { background: transparent; color: inherit; padding: 0; width: 22px; height: 22px; font-size: 16px; border-radius: 50%; }
+        .chip button:hover { background: var(--accent-soft-hover); }
+
+        /* Killfile */
+        .phrase { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+        .gui .phrase textarea { height: auto; min-height: 60px; background: var(--surface); font-family: inherit; font-size: 14px; }
+
+        /* ---------- Actions ---------- */
+        .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+        .action-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+        .action-card h3 { margin: 0; }
+        .action-card > p { margin: -6px 0 0; color: var(--muted); font-size: 13.5px; }
+        .action-list { display: flex; flex-direction: column; gap: 8px; }
+        .action-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
+        .action-item > div:first-child { flex: 1 1 150px; min-width: 0; }
+        .action-item span { font-size: 13.5px; color: var(--muted); }
+        .action-item strong { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
+        .file-pick { position: relative; overflow: hidden; }
+        .file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .file-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* ---------- FAQ ---------- */
+        .prose { max-width: 76ch; }
+        .prose p, .prose li { color: var(--text); }
+        .prose h3:first-child { margin-top: 0; }
+        .prose code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+        .prose pre {
+            font-family: var(--mono); font-size: 13px; line-height: 1.6;
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 14px 16px; overflow-x: auto; white-space: pre-wrap;
+        }
+        .note {
+            background: var(--warn-soft); border-left: 3px solid var(--warn);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            padding: 12px 16px; margin: 14px 0; font-size: 14px;
+        }
+        .note strong { color: var(--warn); }
+        .timings { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+        .timings div { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; }
+        .timings code { display: block; border: none; background: none; padding: 0; margin-bottom: 4px; font-weight: 600; color: var(--accent); }
+        .timings span { color: var(--muted); font-size: 13px; }
+
+        /* ---------- Save bar ---------- */
+        .savebar {
+            position: sticky; bottom: 0; z-index: 5;
+            background: color-mix(in srgb, var(--bg) 85%, transparent);
+            backdrop-filter: blur(8px);
+            border-top: 1px solid var(--border);
+        }
+        .savebar .container { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding-top: 10px; padding-bottom: 10px; }
+        .save-state { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+        .save-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
+        .save-state[data-state="dirty"] { color: var(--warn); font-weight: 550; }
+        .save-state[data-state="dirty"]::before { background: var(--warn); }
+        .save-state[data-state="saved"] { color: var(--success); }
+        .save-state[data-state="saved"]::before { background: var(--success); }
+        .save-state[data-state="error"] { color: var(--danger); }
+        .save-state[data-state="error"]::before { background: var(--danger); }
+        .kbd { font-family: var(--mono); font-size: 11px; opacity: .75; font-weight: 500; }
+
+        /* ---------- Toasts ---------- */
+        .toasts { position: fixed; right: 20px; bottom: 76px; z-index: 50; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 32px)); }
+        .toast {
+            display: flex; align-items: flex-start; gap: 10px;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-left: 4px solid var(--success);
+            border-radius: var(--radius-sm); box-shadow: var(--shadow);
+            padding: 11px 12px 11px 14px; font-size: 14px;
+            animation: toast-in .2s ease-out; white-space: pre-wrap; word-break: break-word;
+        }
+        .toast.error { border-left-color: var(--danger); }
+        .toast.info { border-left-color: var(--accent); }
+        .toast .msg { flex: 1; }
+        .toast button { background: none; color: var(--muted); padding: 0 4px; font-size: 16px; line-height: 1; }
+        .toast button:hover { background: none; color: var(--text); }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+        /* ---------- Footer ---------- */
+        footer { text-align: center; padding: 8px 0 28px; font-size: 13px; color: var(--muted); }
+        footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--border-strong); }
+        footer a:hover { color: var(--accent); border-color: var(--accent); }
+
+        @media (max-width: 700px) {
+            .container { padding: 0 16px; }
+            .brand p { display: none; }
+            .tab-content { padding: 16px; }
+            .add-feed .grid { grid-template-columns: 1fr; }
+            .add-feed .check { justify-content: flex-start; height: auto; }
+            .config-grid { grid-template-columns: 1fr; }
+            .config-row { grid-template-columns: 1fr; gap: 3px; }
+            .save-state { margin-right: auto; }
+            .kbd { display: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+        }
     </style>
 </head>
 <body>
-    <h1>Nachrichtensortiermaschine</h1>
-    
-    <!-- Tab Buttons -->
-    <div class="tabs">
-        <div class="tab active" onclick="showTab('config')">config.cfg</div>
-        <div class="tab" onclick="showTab('feeds')">feeds.cfg</div>
-        <div class="tab" onclick="showTab('filter')">filter.txt</div>
-        <div class="tab" onclick="showTab('killfile')">killfile.txt</div>
-        <div class="tab" onclick="showTab('crontab')">crontab</div>
-        <div class="tab" onclick="showTab('actions')">Actions</div>
-        <div class="tab" onclick="showTab('FAQ')">FAQ</div>
-    </div>
+    <header class="site-header">
+        <div class="container">
+            <div class="brand">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+                </div>
+                <div>
+                    <h1>Nachrichtensortiermaschine</h1>
+                    <p>RSS feeds and read-later articles, delivered to your mailbox</p>
+                </div>
+            </div>
+            <nav class="tabs" role="tablist">
+                <button type="button" class="tab active" data-tab="config">Settings</button>
+                <button type="button" class="tab" data-tab="feeds">Feeds</button>
+                <button type="button" class="tab" data-tab="filter">Filter</button>
+                <button type="button" class="tab" data-tab="killfile">Killfile</button>
+                <button type="button" class="tab" data-tab="crontab">Crontab</button>
+                <button type="button" class="tab" data-tab="actions">Actions</button>
+                <button type="button" class="tab" data-tab="FAQ">FAQ</button>
+            </nav>
+        </div>
+    </header>
 
-    <!-- Tab Content -->
     <form action="/" method="POST">
+        <main class="container">
         <div id="config" class="tab-content active">
-            <h2>config.cfg</h2>
-            <textarea name="config">{{ config }}</textarea>
+            <div class="tab-header">
+                <h2>Settings <span class="filename">config.cfg</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="config"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="config-gui"></div>
+            <textarea name="config" hidden spellcheck="false">{{ config }}</textarea>
         </div>
         <div id="feeds" class="tab-content">
-            <h2>feeds.cfg</h2>
-            <textarea name="feeds">{{ feeds }}</textarea>
+            <div class="tab-header">
+                <h2>Feeds <span class="filename">feeds.cfg</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="feeds"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="feeds-gui"></div>
+            <textarea name="feeds" hidden spellcheck="false">{{ feeds }}</textarea>
         </div>
         <div id="filter" class="tab-content">
-            <h2>filter.txt</h2>
-            <textarea name="filter">{{ filter }}</textarea>
+            <div class="tab-header">
+                <h2>Filter <span class="filename">filter.txt</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="filter"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="filter-gui"></div>
+            <textarea name="filter" hidden spellcheck="false">{{ filter }}</textarea>
         </div>
         <div id="killfile" class="tab-content">
-            <h2>killfile.txt</h2>
-            <textarea name="killfile">{{ killfile }}</textarea>
+            <div class="tab-header">
+                <h2>Killfile <span class="filename">killfile.txt</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="killfile"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="killfile-gui"></div>
+            <textarea name="killfile" hidden spellcheck="false">{{ killfile }}</textarea>
         </div>
         <div id="crontab" class="tab-content">
-            <h2>crontab</h2>
-            <textarea name="crontab">{{ crontab }}</textarea>
+            <div class="tab-header">
+                <h2>Crontab <span class="filename">/etc/cron.d/myjobs</span></h2>
+            </div>
+            <textarea name="crontab" spellcheck="false">{{ crontab }}</textarea>
         </div>
         <div id="actions" class="tab-content">
-            <h2>Actions</h2>
-            <div class="script-buttons">
-                <button type="button" onclick="runScript('fetch-feeds')">Fetch Feeds</button>
-                <button type="button" onclick="runScript('send-txt')">Send TXT</button>
-                <button type="button" onclick="runScript('send-epub')">Send EPUB</button><br><br>
-                <button type="button" onclick="window.location.href='/export-opml'">Export OPML</button>
-                <div class="file-upload">
-                    <!-- Move the OPML upload form outside the main form -->
-                    <div id="opml-upload">
-                        <input type="file" id="opml-file" accept=".opml">
-                        <button type="button" onclick="uploadOpml()">Import OPML</button>
+            <div class="tab-header">
+                <h2>Actions</h2>
+            </div>
+            <div class="action-grid">
+                <section class="action-card">
+                    <h3>Run now</h3>
+                    <p>Start a job right away instead of waiting for the crontab.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Fetch feeds</strong><span>Deliver new articles to your mailbox</span></div>
+                            <button type="button" onclick="runScript('fetch-feeds', this)">Run</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Send TXT</strong><span>Mail the read-later folder as text</span></div>
+                            <button type="button" onclick="runScript('send-txt', this)">Send</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Send EPUB</strong><span>Mail the read-later folder as ePub</span></div>
+                            <button type="button" onclick="runScript('send-epub', this)">Send</button>
+                        </div>
                     </div>
-                </div>
+                </section>
+                <section class="action-card">
+                    <h3>Download</h3>
+                    <p>Build your reading list and save it here instead of mailing it.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Reading list as TXT</strong><span>Plain text</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-txt', this)">Download</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Reading list as EPUB</strong><span>For e-readers</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-epub', this)">Download</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="action-card">
+                    <h3>OPML</h3>
+                    <p>Move your feed list to or from another feed reader.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Export</strong><span>Download feeds.cfg as OPML</span></div>
+                            <button type="button" class="secondary" onclick="window.location.href='/export-opml'">Export</button>
+                        </div>
+                        <div class="action-item" id="opml-upload">
+                            <div><strong>Import</strong><span class="file-name" id="opml-file-name">Add feeds from an OPML file</span></div>
+                            <div style="display: flex; gap: 6px">
+                                <label class="btn secondary file-pick">Choose…<input type="file" id="opml-file" accept=".opml,.xml"></label>
+                                <button type="button" id="opml-import" onclick="uploadOpml(this)" disabled>Import</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
         <div id="FAQ" class="tab-content">
-            <h1>FAQ</h1>
-                <h2>How to Use</h2>
-
+            <div class="tab-header">
+                <h2>FAQ</h2>
+            </div>
+            <div class="prose">
     <h3>Configuration</h3>
-    <p>Please configure your mail settings here:</p>
+    <p>Please configure your mail settings in the Settings tab.</p>
 
     <div class="note">
         <strong>Recommendation:</strong> I recommend using a separate mail account for this program. If you're trying to integrate news, order confirmations, private communication, and so on into one INBOX, it will end in chaos.
@@ -202,17 +497,14 @@
 
     <p>If you're using Gmail (which you shouldn't) with 2FA, you have to set an app password.</p>
 
-    <p><strong>Regarding the Artikelpostfach-Configuration:</strong> This is for the integrated Pocket/Instapaper/Readlater-Functionality. Send a link to the mail you've configured in [imap-Artikelpostfach] and Nachrichtensortiermaschine will fetch the full text and send it with the SMTP-Server to the address configured in [smtp-Artikelpostfach].</p>
-    
+    <p><strong>Regarding the Artikelpostfach-Configuration:</strong> This is for the integrated Pocket/Instapaper/Readlater-Functionality. Send a link to the mail you've configured in <code>[imap-Artikelpostfach]</code> and Nachrichtensortiermaschine will fetch the full text and send it with the SMTP-Server to the address configured in <code>[smtp-Artikelpostfach]</code>.</p>
+
     <p>I'm using a second mail address here because this allows me to send articles from several mail addresses without figuring out where and how to separate them from other mails.</p>
 
     <div class="note">
-        <strong>Note:</strong> Pocket-Ersatz.py will scan every mail here for links and open a Firefox with BypassPaywall & I still don't care about cookies in the background to fetch the articles. You may want to configure a whitelist of allowed senders to prevent spam from being processed.
-        You also need to configure a folder called "Archiv" in the root of your mailbox
+        <strong>Note:</strong> Pocket-Ersatz.py will scan every mail here for links and open a Firefox with BypassPaywall &amp; I still don't care about cookies in the background to fetch the articles. You may want to configure a whitelist of allowed senders to prevent spam from being processed.
+        You also need to configure a folder called "Archiv" in the root of your mailbox.
     </div>
-
-    <pre>[imap-Artikelpostfach]
-[smtp-Artikelpostfach]</pre>
 
     <h3>Feeds</h3>
     <p>Put in feeds in this configuration:</p>
@@ -239,11 +531,11 @@ backup_to_archiveorg:
 Currently not functional
 
 [cronjobs]
-Currently not functional
-</pre>
+Currently not functional</pre>
+
     <h3>Filter</h3>
     <p>Put in keywords here (one per line) and if the keyword is included in a mail subject, the mail will be moved to the folder you've configured in configuration → Filterfolder.</p>
-    
+
     <h4>How does this work?</h4>
     <ul>
         <li>Put in e.g. <strong>Trump</strong> in the filter.</li>
@@ -252,123 +544,558 @@ Currently not functional
         <li>Please be careful with filtering: If you filter <strong>"AI"</strong>, you may also filter out <strong>"Malaysia"</strong>.</li>
     </ul>
 
-    <h3>Timings:</h3>
-    <h4>nsm.py</h4>
-    <p>- The main engine that fetches your feeds<br>
-       - Runs once an hour as default</p>
-
-    <h4>pocket-ersatz.py</h4>
-    <p>- The script that fetches your read-later articles<br>
-       - Runs once an hour as default</p>
-
-    <h4>pocket-mailer.py</h4>
-    <p>- Sends everything in your read-later folder as text<br>
-       - Runs once a day at 07:30:00 in the morning</p>
-
-    <h4>pocket-mailer-epub.py</h4>
-    <p>- Sends everything in your read-later folder as ePub<br>
-       - Doesn't run by default</p>
+    <h3>Timings</h3>
+    <div class="timings">
+        <div><code>nsm.py</code>The main engine that fetches your feeds<br><span>Runs once an hour by default</span></div>
+        <div><code>pocket-ersatz.py</code>Fetches your read-later articles<br><span>Runs once an hour by default</span></div>
+        <div><code>pocket-mailer.py</code>Sends everything in your read-later folder as text<br><span>Runs daily at 07:30</span></div>
+        <div><code>pocket-mailer-epub.py</code>Sends everything in your read-later folder as ePub<br><span>Doesn't run by default</span></div>
+    </div>
 
     <h3>Nachrichtensortiermaschine plays nicely along your newsletters</h3>
     <p>Get some news via RSS and subscribe to other insightful texts from your favourite authors via their newsletter. We are living in a golden age of newsletters, so feel free to mix things up!</p>
 
     <h3>Social Features</h3>
     <p>Everybody has a mail address. Simply forward the mail with the article to whoever you want to read it. Feel free to add a comment.</p>
-
+            </div>
         </div>
+        </main>
 
-        <!-- Update the Save Changes button -->
-        <button type="submit">Save Changes</button>
-        <!-- Place this div somewhere visible, e.g. right under the Save Changes button -->
-        <div id="status" style="text-align: center; font-weight: bold; color: green; display: none;"></div>
+        <div class="savebar">
+            <div class="container">
+                <span class="save-state" id="save-state" data-state="clean" role="status">No unsaved changes</span>
+                <button type="submit" id="save-button">Save changes <span class="kbd">Ctrl+S</span></button>
+            </div>
+        </div>
     </form>
 
-    <!-- Footer with Link -->
     <footer>
-        <p>Nachrichtensortiermaschine: <a href="https://github.com/michael-hatz/nachrichtensortiermaschine" target="_blank">GitHub</a></p>
+        Nachrichtensortiermaschine · <a href="https://github.com/michael-hatz/nachrichtensortiermaschine" target="_blank" rel="noopener">GitHub</a>
     </footer>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
 
     <script>
-        // Function to switch between tabs
+        // ---------- Tabs ----------
+        const TABS = [...document.querySelectorAll('.tab')].map(tab => tab.dataset.tab);
         function showTab(tabName) {
-            // Remove the 'active' class from all tabs and tab content
-            document.querySelectorAll('.tab').forEach(function(tab) {
-                tab.classList.remove('active');
+            if (!TABS.includes(tabName)) tabName = TABS[0];
+            document.querySelectorAll('.tab').forEach(tab => {
+                const active = tab.dataset.tab === tabName;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', active);
             });
-            document.querySelectorAll('.tab-content').forEach(function(content) {
-                content.classList.remove('active');
-            });
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.toggle('active', content.id === tabName));
+            history.replaceState(null, '', '#/' + tabName);  // '#/' so the browser doesn't jump to the element
+        }
+        document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
+        showTab(location.hash.replace(/^#\/?/, ''));
 
-            // Add 'active' class to the selected tab and corresponding content
-            document.querySelector(`.tab[onclick="showTab('${tabName}')"]`).classList.add('active');
-            document.getElementById(tabName).classList.add('active');
+        // ---------- Toasts ----------
+        function toast(message, type = 'success') {
+            const box = document.createElement('div');
+            box.className = `toast ${type}`;
+            box.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            const msg = document.createElement('div');
+            msg.className = 'msg';
+            msg.textContent = message;
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.textContent = '×';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.onclick = () => box.remove();
+            box.append(msg, close);
+            document.getElementById('toasts').append(box);
+            setTimeout(() => box.remove(), type === 'error' ? 10000 : 4000);
         }
 
-        function runScript(action) {
-            fetch(`/${action}`, { 
+        function setBusy(button, busy) {
+            button.disabled = busy;
+            button.classList.toggle('busy', busy);
+        }
+
+        function runScript(action, button) {
+            setBusy(button, true);
+            fetch(`/${action}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
             })
-            .then(response => response.text())
-            .then(data => {
-                alert(data);
-            })
-            .catch(error => {
-                alert('Error: ' + error);
-            });
+            .then(response => response.text().then(data => toast(data, response.ok ? 'success' : 'error')))
+            .catch(error => toast('Error: ' + error, 'error'))
+            .finally(() => setBusy(button, false));
         }
 
-        function uploadOpml() {
-            const fileInput = document.getElementById('opml-file');
-            if (!fileInput.files.length) {
-                alert('Please select an OPML file to upload.');
-                return;
-            }
+        function downloadFile(action, button) {
+            setBusy(button, true);
+            fetch(`/${action}`)
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text); });
+                }
+                const disposition = response.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="?([^";]+)"?/);
+                return response.blob().then(blob => ({ blob, name: match ? match[1] : action }));
+            })
+            .then(({ blob, name }) => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(link.href);
+            })
+            .catch(error => toast(error.message, 'error'))
+            .finally(() => setBusy(button, false));
+        }
+
+        const opmlFile = document.getElementById('opml-file');
+        opmlFile.addEventListener('change', () => {
+            const file = opmlFile.files[0];
+            document.getElementById('opml-file-name').textContent = file ? file.name : 'Add feeds from an OPML file';
+            document.getElementById('opml-import').disabled = !file;
+        });
+
+        function uploadOpml(button) {
+            if (!opmlFile.files.length) return;
+            if (dirty && !confirm('Importing reloads the page and discards your unsaved changes. Continue?')) return;
 
             const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
+            formData.append('file', opmlFile.files[0]);
 
+            setBusy(button, true);
             fetch('/import-opml', {
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.text())
-            .then(data => {
-                alert(data);
+            .then(response => response.text().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data);
+                // feeds.cfg was rewritten on the server: reload so a later save can't overwrite it
+                try { sessionStorage.setItem('nsm-toast', data); } catch (e) {}
+                dirty = false;
+                location.reload();
             })
             .catch(error => {
-                alert('Error: ' + error);
+                toast(error.message, 'error');
+                setBusy(button, false);
+            });
+        }
+        try {
+            const pending = sessionStorage.getItem('nsm-toast');
+            if (pending) { sessionStorage.removeItem('nsm-toast'); toast(pending); }
+        } catch (e) {}
+
+        // ---------- Editor GUI ----------
+        // The textareas stay the source of truth: every GUI change is written back into
+        // its textarea, and "Save Changes" submits the textareas exactly as before.
+        let dirty = false;
+        const field = name => document.querySelector(`textarea[name="${name}"]`);
+
+        function el(tag, props = {}, children = []) {
+            const node = document.createElement(tag);
+            for (const [key, value] of Object.entries(props)) {
+                if (key === 'class') node.className = value;
+                else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+                else if (key === 'list' || key.startsWith('aria-') || !(key in node)) node.setAttribute(key, value);
+                else node[key] = value;
+            }
+            node.append(...children);
+            return node;
+        }
+
+        const saveState = document.getElementById('save-state');
+        function setSaveState(state, text) {
+            saveState.dataset.state = state;
+            saveState.textContent = text;
+        }
+
+        function markDirty() {
+            dirty = true;
+            setSaveState('dirty', 'Unsaved changes');
+        }
+
+        function setField(name, text) {
+            if (field(name).value !== text) {
+                field(name).value = text;
+                markDirty();
+            }
+        }
+
+        // Minimal INI reader matching what configparser accepts ("key = value" or "key: value")
+        function parseIni(text) {
+            const sections = [];
+            let current = null;
+            for (const line of text.split('\n')) {
+                const trimmed = line.trim();
+                const header = trimmed.match(/^\[(.+)\]$/);
+                if (header) {
+                    current = { name: header[1].trim(), entries: [] };
+                    sections.push(current);
+                } else if (current && trimmed && !trimmed.startsWith('#') && !trimmed.startsWith(';')) {
+                    const kv = line.match(/^\s*([^=:]+?)\s*[=:]\s*(.*?)\s*$/);
+                    if (kv) current.entries.push({ key: kv[1], value: kv[2] });
+                }
+            }
+            return sections;
+        }
+
+        // Change one value in place so comments and layout of the file are kept
+        function setIniValue(text, section, key, value) {
+            const lines = text.split('\n');
+            let inSection = false;
+            for (let i = 0; i < lines.length; i++) {
+                const header = lines[i].trim().match(/^\[(.+)\]$/);
+                if (header) {
+                    inSection = header[1].trim() === section;
+                    continue;
+                }
+                const kv = inSection && lines[i].match(/^(\s*)([^=:]+?)(\s*[=:]\s*)(.*?)\s*$/);
+                if (kv && kv[2].toLowerCase() === key.toLowerCase()) {
+                    lines[i] = kv[1] + kv[2] + kv[3] + value;
+                    break;
+                }
+            }
+            return lines.join('\n');
+        }
+
+        // --- Settings (config.cfg) ---
+        const CONFIG_SECTIONS = {
+            'IMAP': 'Mailbox your feed articles are delivered to.',
+            'IMAP-Artikelpostfach': 'Mailbox you send read-later links to.',
+            'Mailings': 'Read-later folder the TXT/EPUB exports are built from.',
+            'SMTP': 'Outgoing server for feed articles and EPUB exports.',
+            'SMTP-Artikelpostfach': 'Outgoing server for read-later articles and TXT exports.',
+            'cronjobs': 'Not used yet. The schedule lives in the crontab tab.',
+        };
+        const CONFIG_LABELS = {
+            'imaphost': 'Server', 'imapuser': 'User', 'imappasscode': 'Password',
+            'eingangsordner': 'Inbox folder', 'unread_folder': 'Read-later folder',
+            'port': 'Port', 'smtp_server': 'Server', 'sender_email': 'Sender / login',
+            'receiver_email': 'Send to', 'password': 'Password',
+            'filterfolder': 'Folder for filtered mails', 'backup_to_archiveorg': 'Back up to archive.org',
+            'openai-key': 'OpenAI API key',
+        };
+        const SECRET_KEY = /pass|key/i;
+        const FOLDER_KEYS = ['eingangsordner', 'unread_folder', 'filterfolder'];
+
+        function renderConfig() {
+            const gui = document.getElementById('config-gui');
+            const sections = parseIni(field('config').value);
+            gui.replaceChildren();
+            if (!sections.length) {
+                gui.append(el('p', { class: 'hint' }, ['config.cfg is empty. Use "Edit as text" to fill it in.']));
+                return;
+            }
+            const grid = el('div', { class: 'config-grid' });
+            gui.append(grid);
+            for (const section of sections) {
+                const box = el('fieldset', { class: 'config-section' }, [el('legend', {}, [section.name])]);
+                if (CONFIG_SECTIONS[section.name]) box.append(el('p', { class: 'hint' }, [CONFIG_SECTIONS[section.name]]));
+                for (const { key, value } of section.entries) {
+                    const id = `cfg-${section.name}-${key}`.replace(/[^\w-]/g, '_');
+                    const update = v => setField('config', setIniValue(field('config').value, section.name, key, v));
+                    let input;
+                    if (/^(true|false)$/i.test(value)) {
+                        input = el('input', { type: 'checkbox', id, checked: value.toLowerCase() === 'true',
+                                              onchange: e => update(e.target.checked ? 'True' : 'False') });
+                    } else if (SECRET_KEY.test(key)) {
+                        const secret = el('input', { type: 'password', id, value, autocomplete: 'off', oninput: e => update(e.target.value) });
+                        const toggle = el('button', { type: 'button', class: 'secondary', textContent: 'Show', onclick: () => {
+                            const show = secret.type === 'password';
+                            secret.type = show ? 'text' : 'password';
+                            toggle.textContent = show ? 'Hide' : 'Show';
+                        } });
+                        input = el('div', { class: 'secret' }, [secret, toggle]);
+                    } else {
+                        input = el('input', { type: 'text', id, value, oninput: e => update(e.target.value) });
+                        if (FOLDER_KEYS.includes(key.toLowerCase())) input.setAttribute('list', 'imap-folders');
+                    }
+                    const label = el('label', { htmlFor: id, title: key }, [CONFIG_LABELS[key.toLowerCase()] || key]);
+                    box.append(el('div', { class: 'config-row' }, [label, el('div', {}, [input])]));
+                }
+                grid.append(box);
+            }
+        }
+
+        // --- Feeds (feeds.cfg) ---
+        const FEED_KEYS = ['url', 'fulltext', 'active', 'imap-mailbox'];
+
+        function parseFeeds(text) {
+            return parseIni(text).map(section => {
+                const get = key => (section.entries.find(e => e.key.toLowerCase() === key) || {}).value;
+                return {
+                    name: section.name,
+                    url: get('url') || '',
+                    mailbox: get('imap-mailbox') || 'INBOX',
+                    // same rules as nsm.py: fulltext only if "True", active unless "False"
+                    fulltext: get('fulltext') === 'True',
+                    active: get('active') !== 'False',
+                    extra: section.entries.filter(e => !FEED_KEYS.includes(e.key.toLowerCase())),
+                };
             });
         }
 
-        // Add form submission handling
-        document.querySelector('form').addEventListener('submit', function(e) {
+        function serializeFeeds(feeds) {
+            return feeds.map(f => [
+                `[${f.name}]`,
+                `url = ${f.url}`,
+                `fulltext = ${f.fulltext ? 'True' : 'False'}`,
+                `active = ${f.active ? 'True' : 'False'}`,
+                `imap-mailbox = ${f.mailbox}`,
+                ...f.extra.map(e => `${e.key} = ${e.value}`),
+            ].join('\n')).join('\n\n') + (feeds.length ? '\n' : '');
+        }
+
+        function renderFeeds() {
+            const gui = document.getElementById('feeds-gui');
+            const feeds = parseFeeds(field('feeds').value);
+            const rows = new Map();
+            const tbody = el('tbody');
+            const count = el('span', { class: 'count' });
+
+            const commit = () => {
+                setField('feeds', serializeFeeds(feeds));
+                const paused = feeds.filter(f => !f.active).length;
+                count.textContent = `${feeds.length} feed${feeds.length === 1 ? '' : 's'}` + (paused ? `, ${paused} paused` : '');
+            };
+
+            // Section names must be unique and must not contain brackets
+            const nameError = (name, self) => {
+                if (!name) return 'Please enter a name.';
+                if (/[\[\]]/.test(name)) return 'The name must not contain [ or ].';
+                if (feeds.some(f => f !== self && f.name.toLowerCase() === name.toLowerCase())) return 'A feed with this name already exists.';
+                return '';
+            };
+
+            function row(feed) {
+                const tr = el('tr', { class: feed.active ? '' : 'paused' });
+                const text = (prop, label, extra = {}) => el('input', { type: 'text', value: feed[prop], 'aria-label': label,
+                    oninput: e => { feed[prop] = e.target.value.trim(); commit(); }, ...extra });
+                const name = el('input', { type: 'text', value: feed.name, 'aria-label': 'Name', oninput: e => {
+                    const error = nameError(e.target.value.trim(), feed);
+                    e.target.setCustomValidity(error);
+                    if (error) { e.target.reportValidity(); return; }
+                    feed.name = e.target.value.trim();
+                    commit();
+                } });
+                const active = el('label', { class: 'switch', title: 'Active / paused' }, [
+                    el('input', { type: 'checkbox', checked: feed.active, 'aria-label': `Active: ${feed.name}`, onchange: e => {
+                        feed.active = e.target.checked;
+                        tr.className = feed.active ? '' : 'paused';
+                        commit();
+                    } }),
+                    el('span'),
+                ]);
+                const fulltext = el('input', { type: 'checkbox', checked: feed.fulltext, 'aria-label': 'Full text',
+                    title: 'Load the full article from the website (for truncated feeds)',
+                    onchange: e => { feed.fulltext = e.target.checked; commit(); } });
+                const remove = el('button', { type: 'button', class: 'danger', title: 'Delete feed', 'aria-label': 'Delete feed', textContent: '✕', onclick: () => {
+                    if (!confirm(`Delete feed "${feed.name}"?`)) return;
+                    feeds.splice(feeds.indexOf(feed), 1);
+                    rows.delete(feed);
+                    tr.remove();
+                    commit();
+                } });
+                tr.append(
+                    el('td', { class: 'center' }, [active]),
+                    el('td', {}, [name]),
+                    el('td', {}, [text('url', 'Feed URL', { type: 'url' })]),
+                    el('td', {}, [text('mailbox', 'Mail folder', { list: 'imap-folders' })]),
+                    el('td', { class: 'center' }, [fulltext]),
+                    el('td', { class: 'center' }, [remove]),
+                );
+                rows.set(feed, tr);
+                return tr;
+            }
+
+            const search = el('input', { type: 'search', placeholder: 'Search by name, URL or folder…', 'aria-label': 'Search feeds', oninput: applySearch });
+            function applySearch() {
+                const query = search.value.trim().toLowerCase();
+                for (const [feed, tr] of rows) {
+                    tr.hidden = query && ![feed.name, feed.url, feed.mailbox].some(v => v.toLowerCase().includes(query));
+                }
+            }
+
+            // "Add feed" form
+            const addName = el('input', { type: 'text', placeholder: 'e.g. tagesschau', id: 'add-feed-name' });
+            const addUrl = el('input', { type: 'url', placeholder: 'https://example.org/feed', id: 'add-feed-url' });
+            const addFolder = el('input', { type: 'text', value: 'INBOX', list: 'imap-folders', id: 'add-feed-folder' });
+            const addFulltext = el('input', { type: 'checkbox', id: 'add-feed-fulltext' });
+            const addError = el('div', { class: 'error', role: 'alert' });
+            function addFeed() {
+                const feed = { name: addName.value.trim(), url: addUrl.value.trim(), mailbox: addFolder.value.trim() || 'INBOX',
+                               fulltext: addFulltext.checked, active: true, extra: [] };
+                const error = nameError(feed.name, null) || (/^https?:\/\/\S+$/.test(feed.url) ? '' : 'Please enter a feed URL starting with http:// or https://.');
+                addError.textContent = error;
+                if (error) return;
+                feeds.push(feed);
+                tbody.querySelector('.empty-row')?.remove();
+                tbody.append(row(feed));
+                commit();
+                search.value = '';
+                applySearch();
+                addName.value = addUrl.value = '';
+                addFulltext.checked = false;
+                rows.get(feed).scrollIntoView({ block: 'nearest' });
+                addName.focus();
+            }
+            const addBox = el('div', { class: 'add-feed', hidden: true, onkeydown: e => {
+                if (e.key === 'Enter') { e.preventDefault(); addFeed(); }
+            } }, [
+                el('div', { class: 'grid' }, [
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-name' }, ['Name']), addName]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-url' }, ['Feed URL']), addUrl]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-folder' }, ['Mail folder']), addFolder]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-fulltext' }, ['Full text']), el('div', { class: 'check' }, [addFulltext])]),
+                    el('button', { type: 'button', textContent: 'Add', onclick: addFeed }),
+                ]),
+                addError,
+            ]);
+            const addToggle = el('button', { type: 'button', textContent: '+ Add feed', onclick: () => {
+                addBox.hidden = !addBox.hidden;
+                addToggle.textContent = addBox.hidden ? '+ Add feed' : 'Close';
+                addToggle.className = addBox.hidden ? '' : 'ghost';
+                if (!addBox.hidden) addName.focus();
+            } });
+
+            feeds.forEach(feed => tbody.append(row(feed)));
+            if (!feeds.length) tbody.append(el('tr', { class: 'empty-row' }, [el('td', { colSpan: 6 }, ['No feeds yet. Add one or import an OPML file under Actions.'])]));
+            gui.replaceChildren(
+                el('div', { class: 'toolbar' }, [search, count, addToggle]),
+                addBox,
+                el('div', { class: 'feed-table-wrap' }, [el('table', { class: 'feed-table' }, [
+                    el('colgroup', {}, [el('col'), el('col', { class: 'c-name' }), el('col', { class: 'c-url' }), el('col', { class: 'c-folder' }), el('col'), el('col')]),
+                    el('thead', {}, [el('tr', {}, [
+                        el('th', { class: 'center' }, ['Active']), el('th', {}, ['Name']), el('th', {}, ['Feed URL']),
+                        el('th', {}, ['Mail folder']), el('th', { class: 'center' }, ['Full text']), el('th'),
+                    ])]),
+                    tbody,
+                ])]),
+            );
+            const paused = feeds.filter(f => !f.active).length;
+            count.textContent = `${feeds.length} feed${feeds.length === 1 ? '' : 's'}` + (paused ? `, ${paused} paused` : '');
+        }
+
+        // --- Filter (filter.txt: one keyword per line) ---
+        function renderFilter() {
+            const gui = document.getElementById('filter-gui');
+            const words = field('filter').value.split('\n').map(w => w.trim()).filter(Boolean);
+            const commit = () => setField('filter', words.length ? words.join('\n') + '\n' : '');
+            const chips = el('div', { class: 'chips' });
+            const draw = () => {
+                chips.replaceChildren(...words.map((word, i) => el('span', { class: 'chip' }, [
+                    word,
+                    el('button', { type: 'button', textContent: '×', title: `Remove "${word}"`, 'aria-label': `Remove ${word}`,
+                                   onclick: () => { words.splice(i, 1); commit(); draw(); } }),
+                ])));
+                if (!words.length) chips.append(el('span', { class: 'hint' }, ['No filter keywords yet.']));
+            };
+            const input = el('input', { type: 'text', placeholder: 'Add a keyword and press Enter', 'aria-label': 'New filter keyword',
+                                        onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); add(); } } });
+            function add() {
+                const word = input.value.trim();
+                input.value = '';
+                if (!word || words.some(w => w.toLowerCase() === word.toLowerCase())) return;
+                words.push(word);
+                commit();
+                draw();
+            }
+            gui.replaceChildren(
+                el('p', { class: 'hint' }, ['Mails whose subject contains one of these keywords (case-insensitive) are moved to the "Folder for filtered mails" from Settings. Short words also match inside longer ones: "AI" matches "Malaysia".']),
+                el('div', { class: 'toolbar' }, [input, el('button', { type: 'button', textContent: 'Add', onclick: add })]),
+                chips,
+            );
+            draw();
+        }
+
+        // --- Killfile (killfile.txt: phrases separated by a blank line) ---
+        function renderKillfile() {
+            const gui = document.getElementById('killfile-gui');
+            const phrases = field('killfile').value.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+            // a blank line inside a phrase would split it in two
+            const commit = () => {
+                const clean = phrases.map(p => p.replace(/\n\s*\n/g, '\n').trim()).filter(Boolean);
+                setField('killfile', clean.length ? clean.join('\n\n') + '\n' : '');
+            };
+            const list = el('div');
+            const draw = () => {
+                list.replaceChildren(...phrases.map((phrase, i) => el('div', { class: 'phrase' }, [
+                    el('textarea', { value: phrase, rows: Math.min(8, Math.max(2, Math.ceil(phrase.length / 90) + 1)), 'aria-label': `Phrase ${i + 1}`,
+                                     oninput: e => { phrases[i] = e.target.value; commit(); } }),
+                    el('button', { type: 'button', class: 'danger', textContent: '✕', title: 'Remove phrase', 'aria-label': 'Remove phrase',
+                                   onclick: () => { phrases.splice(i, 1); commit(); draw(); } }),
+                ])));
+                if (!phrases.length) list.append(el('p', { class: 'hint' }, ['No phrases yet.']));
+            };
+            gui.replaceChildren(
+                el('p', { class: 'hint' }, ['These phrases are removed from the article text before it is mailed, e.g. subscription notices or boilerplate at the end of articles.']),
+                list,
+                el('button', { type: 'button', class: 'secondary', textContent: '+ Add phrase', onclick: () => {
+                    phrases.push('');
+                    draw();
+                    list.querySelector('.phrase:last-child textarea').focus();
+                } }),
+            );
+            draw();
+        }
+
+        const renderers = { config: renderConfig, feeds: renderFeeds, filter: renderFilter, killfile: renderKillfile };
+        document.querySelectorAll('[data-raw]').forEach(box => box.addEventListener('change', () => {
+            const name = box.dataset.raw;
+            field(name).hidden = !box.checked;
+            document.getElementById(`${name}-gui`).hidden = box.checked;
+            if (!box.checked) renderers[name]();  // pick up edits made in text mode
+        }));
+        document.querySelectorAll('form textarea').forEach(t => t.addEventListener('input', markDirty));
+        Object.values(renderers).forEach(render => render());
+
+        // Folder suggestions from the feed mailbox; the GUI works without them
+        const folderList = el('datalist', { id: 'imap-folders' });
+        document.body.append(folderList);
+        fetch('/api/folders')
+            .then(response => response.ok ? response.json() : [])
+            .then(folders => folders.forEach(name => folderList.append(el('option', { value: name }))))
+            .catch(() => {});
+
+        window.addEventListener('beforeunload', e => {
+            if (dirty) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        const form = document.querySelector('form');
+        form.addEventListener('submit', function(e) {
             e.preventDefault();
-            const statusEl = document.getElementById('status');
-            statusEl.style.display = 'block';
-            statusEl.textContent = 'Saving changes...';
+            const button = document.getElementById('save-button');
+            setBusy(button, true);
+            setSaveState('saving', 'Saving…');
             const formData = new FormData(this);
 
             fetch('/', {
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.text())
-            .then(data => {
-                statusEl.textContent = 'Changes saved!';
-                // Optionally clear the message after a few seconds
-                setTimeout(() => {
-                    statusEl.style.display = 'none';
-                }, 3000);
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.text();
+            })
+            .then(() => {
+                dirty = false;
+                setSaveState('saved', 'All changes saved');
+                setTimeout(() => { if (!dirty) setSaveState('clean', 'No unsaved changes'); }, 3000);
             })
             .catch(error => {
-                statusEl.textContent = 'Error: ' + error;
-                setTimeout(() => {
-                    statusEl.style.display = 'none';
-                }, 3000);
-            });
+                setSaveState('error', 'Saving failed');
+                toast('Could not save: ' + error.message, 'error');
+            })
+            .finally(() => setBusy(button, false));
+        });
+
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                form.requestSubmit();
+            }
         });
     </script>
 </body>

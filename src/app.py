@@ -2,8 +2,13 @@ from flask import Flask, render_template, request, send_file, jsonify
 import os
 import subprocess
 import configparser
+import io
+import shutil
+import tempfile
+from datetime import date
 from xml.etree.ElementTree import Element, SubElement, tostring, ElementTree
 from werkzeug.utils import secure_filename
+from imap_tools import MailBox
 
 app = Flask(__name__)
 UPLOAD_FOLDER = '/app/data/'
@@ -43,6 +48,9 @@ def save():
     filter_content = request.form.get('filter', '')
     killfile_content = request.form.get('killfile', '')
     crontab_content = request.form.get('crontab', '').replace('\r\n', '\n').replace('\r', '\n')
+    # cron ignores the last job if the file does not end with a newline
+    if crontab_content and not crontab_content.endswith('\n'):
+        crontab_content += '\n'
 
     # Helper to normalize line endings for comparison
     def normalize(content):
@@ -116,6 +124,41 @@ def send_epub():
         return "EPUB emails sent successfully!"
     except subprocess.CalledProcessError as e:
         return f"Error sending EPUB emails: {e}", 500
+
+def generate_download(script, filename, download_name, mimetype):
+    """Run a mailer script with --no-mail in a temp dir and return the generated file."""
+    workdir = tempfile.mkdtemp()
+    try:
+        subprocess.run(['python3', script, '--no-mail'], cwd=workdir, check=True)
+        with open(os.path.join(workdir, filename), 'rb') as f:
+            data = io.BytesIO(f.read())
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        return f"Error generating {download_name}: {e}", 500
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return send_file(data, as_attachment=True, download_name=download_name, mimetype=mimetype)
+
+@app.route('/download-txt', methods=['GET'])
+def download_txt():
+    return generate_download('/app/pocket-mailer.py', 'nachrichtensortiermaschine.txt',
+                             f"nachrichtensortiermaschine-{date.today():%Y%m%d}.txt", 'text/plain')
+
+@app.route('/download-epub', methods=['GET'])
+def download_epub():
+    return generate_download('/app/pocket-mailer-epub.py', 'Leseliste.epub',
+                             f"Leseliste-{date.today():%Y%m%d}.epub", 'application/epub+zip')
+
+@app.route('/api/folders', methods=['GET'])
+def list_folders():
+    """List the IMAP folders of the feed mailbox (used for folder suggestions in the GUI)."""
+    config = configparser.ConfigParser()
+    config.read('/app/data/config.cfg')
+    try:
+        imap = config['IMAP']
+        with MailBox(imap['imapHost'], timeout=15).login(imap['imapUser'], imap['imapPasscode'], initial_folder=None) as mailbox:
+            return jsonify(sorted(folder.name for folder in mailbox.folder.list()))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
 
 @app.route('/export-opml', methods=['GET'])
 def export_opml():
@@ -244,7 +287,8 @@ def read_file(file_path):
         return file.read()
 
 def write_file(file_path, content):
-    """Write content to a file."""
+    """Write content to a file with Unix line endings (browsers submit CRLF)."""
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
     with open(file_path, 'w', encoding='utf-8') as file:
         file.write(content)
 

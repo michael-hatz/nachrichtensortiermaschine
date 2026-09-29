@@ -161,9 +161,11 @@ def mailchecker(Eingangsordner):
     #öffne Filterliste
     file_path = os.path.join(script_directory , "/app/data/filter.txt")
     filter = []
-    with open(file_path, "r", encoding="ISO-8859-1") as file:
+    with open(file_path, "r", encoding="utf-8") as file:
         for line in file:
-            filter.append(line.strip())
+            # an empty keyword would match every subject
+            if line.strip():
+                filter.append(line.strip())
     
     filterlower = [element.lower() for element in filter]
 

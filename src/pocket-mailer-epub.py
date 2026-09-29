@@ -8,6 +8,7 @@ from email import encoders
 from imap_tools import MailBox
 import xml2epub
 import os
+import sys
 from bs4 import BeautifulSoup
 import configparser
 
@@ -144,6 +145,7 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
 path = os.getcwd()
 book.create_epub(path)
 
-# Send the EPUB file as an email attachment
-sendeanhang(receiver_email, "Export", "This is an automatic export of your read-later folder from Nachrichtensortiermaschine", dateiname)
+# Send the EPUB file as an email attachment (--no-mail: only create the file, used for downloads)
+if "--no-mail" not in sys.argv:
+    sendeanhang(receiver_email, "Export", "This is an automatic export of your read-later folder from Nachrichtensortiermaschine", dateiname)
 print("done")

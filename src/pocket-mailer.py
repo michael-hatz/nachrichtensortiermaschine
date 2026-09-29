@@ -9,6 +9,7 @@ from email import encoders
 from imap_tools import MailBox
 import pypandoc
 import os
+import sys
 import configparser
 from bs4 import BeautifulSoup
 
@@ -95,7 +96,9 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
 
 #Pandoc und dann raussenden
 pypandoc.convert_text(buchtext , 'plain' , 'markdown' , outputfile="nachrichtensortiermaschine.txt" , extra_args = ['--wrap=none'])
-sendeanhang(receiver_email , "Export" , "this is an automatic export of your read later folder from Nachrichtensortiermaschine" , "nachrichtensortiermaschine.txt")
+# --no-mail: nur Datei erzeugen (Download über das Webinterface)
+if "--no-mail" not in sys.argv:
+    sendeanhang(receiver_email , "Export" , "this is an automatic export of your read later folder from Nachrichtensortiermaschine" , "nachrichtensortiermaschine.txt")
 print("done")
 
 #aktueller stand
