@@ -83,6 +83,7 @@ COPY src/nsm.py ./
 COPY src/pocket-ersatz.py ./
 COPY src/pocket-mailer.py ./
 COPY src/pocket-mailer-epub.py ./
+COPY src/archive-sort.py ./
 COPY src/app.py /app/
 COPY src/templates/ /app/templates/
 

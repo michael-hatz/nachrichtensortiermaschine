@@ -1,5 +1,6 @@
 58 * * * * root /opt/venv/bin/python3 /app/nsm.py;
 36 * * * * root /opt/venv/bin/python3 /app/pocket-ersatz.py;
+45 * * * * root /opt/venv/bin/python3 /app/archive-sort.py;
 27 05 * * * root /opt/venv/bin/python3 /app/pocket-mailer.py >> /app/mailer.log 2>&1;
 0 4 * * * root rm -r /tmp/*;
 15 * * * * root pkill -f /usr/local/bin/geckodriver;
