@@ -29,7 +29,6 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     libnspr4 \
     tar \
-    pandoc \
     fonts-dejavu-core \
     tini \
     && rm -rf /var/lib/apt/lists/*

@@ -6,7 +6,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from imap_tools import MailBox
-import pypandoc
 import os
 import sys
 import configparser
@@ -93,8 +92,9 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
         buchtext = emailinhalt.strip() + "\n\n" + buchtext.strip()
         print(f"Current buchtext: {buchtext}")  # Debug: Log accumulated content
 
-#Pandoc und dann raussenden
-pypandoc.convert_text(buchtext , 'plain' , 'markdown' , outputfile="nachrichtensortiermaschine.txt" , extra_args = ['--wrap=none'])
+#Datei schreiben und dann raussenden
+with open("nachrichtensortiermaschine.txt", "w", encoding="utf-8") as f:
+    f.write(buchtext)
 # --no-mail: nur Datei erzeugen (Download über das Webinterface)
 if "--no-mail" not in sys.argv:
     sendeanhang(receiver_email , "Export" , "this is an automatic export of your read later folder from Nachrichtensortiermaschine" , "nachrichtensortiermaschine.txt")
