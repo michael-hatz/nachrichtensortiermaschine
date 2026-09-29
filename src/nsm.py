@@ -18,6 +18,9 @@ from bs4 import BeautifulSoup, NavigableString
 import re
 import difflib
 import markdown
+import signal
+import traceback
+import html as html_lib
 
 
 #global values
@@ -52,6 +55,15 @@ password = mail_dict['SMTP']['password']
 
 FIRST_RUN_ITEMS = 10    # a newly subscribed feed only mails its newest entries
 REQUEST_TIMEOUT = 60    # seconds for feed downloads and SMTP connections
+FEED_TIMEOUT = 600      # max. seconds per feed, so a hanging feed can't block the others
+
+
+class FeedTimeout(Exception):
+    pass
+
+
+def _feed_timeout(signum, frame):
+    raise FeedTimeout(f"Feed took longer than {FEED_TIMEOUT} seconds")
 
 def load_killfile():
     """Load the killfile.txt into a list of phrases (paragraphs separated by blank lines)."""
@@ -345,50 +357,111 @@ def mark_seen(db, feed_url, urls):
         db.executemany("INSERT OR IGNORE INTO seen_urls (url, feed) VALUES (?, ?)",
                        [(url, feed_url) for url in urls])
 
-def full_text2(url, mailbox, db):
-    feed = feedparser.parse(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT).content)
+def fetch_feed(url):
+    """Download and parse a feed; raise if it can't be fetched or parsed."""
+    #diese Nutzung von Feedparser ist, weil einige Seiten den Feedparser direkt blocken, bzw. requests ohne header
+    response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    feed = feedparser.parse(response.content)
+    if feed.bozo and not feed.entries:
+        raise ValueError(f"Feed could not be parsed: {feed.get('bozo_exception')}")
+    return feed
+
+def process_entries(feed, url, db, send_entry):
+    """Mail every new entry; an error in one entry doesn't stop the others.
+
+    Returns a list of (entry link, error) for the entries that failed. Failed
+    entries are marked as seen too, so a broken article is reported only once
+    and not retried on every run.
+    """
+    failed = []
     for entry in new_entries(feed, db, url):
         print(entry.link)
-        text_trafilatura = trafilatura.fetch_url(entry.link)
+        try:
+            send_entry(entry)
+        except FeedTimeout:
+            # the article that hangs would otherwise time out the feed on every run
+            mark_seen(db, url, [entry.link])
+            raise FeedTimeout(f"Feed took longer than {FEED_TIMEOUT} seconds, stopped at article {entry.link}")
+        except Exception as e:
+            print(f"Error in entry {entry.link}: {e}")
+            failed.append((entry.link, traceback.format_exc()))
+        mark_seen(db, url, [entry.link])
+    return failed
+
+MAX_REDIRECT_PAGES = 3  # max. interstitial "you are being redirected" pages to follow
+REDIRECT_PAGE_MAX_TEXT = 500  # longer pages are real content, not redirect notices
+
+def find_page_redirect(html):
+    """Return the target of a meta-refresh or JavaScript redirect page, or None."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        text = tag.get_text()
+        tag.decompose()
+        m = re.search(r"""window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""", text)
+        if m and len(soup.get_text(strip=True)) <= REDIRECT_PAGE_MAX_TEXT:
+            return m.group(1)
+    if len(soup.get_text(strip=True)) > REDIRECT_PAGE_MAX_TEXT:
+        return None
+    meta = soup.find("meta", attrs={"http-equiv": re.compile("^refresh$", re.I)})
+    if meta:
+        m = re.search(r"url\s*=\s*['\"]?([^'\"]+)", meta.get("content", ""), re.I)
+        if m:
+            return m.group(1)
+    return None
+
+def fetch_article(url):
+    """Download an article, following redirect notice pages (e.g. follow.it tracking links).
+    Returns (html, final_url)."""
+    html = trafilatura.fetch_url(url)
+    for _ in range(MAX_REDIRECT_PAGES):
+        target = find_page_redirect(html) if html else None
+        if not target:
+            break
+        url = requests.compat.urljoin(url, target)
+        html = trafilatura.fetch_url(url)
+    return html, url
+
+def full_text2(url, mailbox, db):
+    def send_entry(entry):
+        text_trafilatura, article_url = fetch_article(entry.link)
         h = trafilatura.extract(text_trafilatura, include_comments=False, include_links=True, include_formatting=True)
+        title = entry.get('title', entry.link)
         if h is not None:
             artikel_content = markdown.markdown(h)  # Convert to Markdown
             artikel_content = preprocess_links(artikel_content)  # Preprocess links
-            create_email(entry.link, entry.title, artikel_content, mailbox)
+            create_email(article_url, title, artikel_content, mailbox)
         else:
-            print(f"Content extraction failed for {entry.link}")
-            create_email(entry.link, entry.title, "Content could not be extracted.", mailbox)
-        mark_seen(db, url, [entry.link])
+            print(f"Content extraction failed for {article_url}")
+            create_email(article_url, title, "Content could not be extracted.", mailbox)
+
+    return process_entries(fetch_feed(url), url, db, send_entry)
 
 def read_rss_feed(url, mailbox, db):
-    #diese Nutzung von Feedparser ist, weil einige Seiten den Feedparser direkt blocken, bzw. requests ohne header
-    feed = feedparser.parse(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT).content)
-
-    for entry in new_entries(feed, db, url):
+    def send_entry(entry):
         content = "kein Content in Feed"
-        if hasattr(entry, 'content'):
-            content = entry.content
-            if hasattr(content[0], 'value'):
-                content = content[0].value
-        else:
+        if entry.get('content') and hasattr(entry.content[0], 'value'):
+            content = entry.content[0].value
+        elif entry.get('summary'):
             content = entry.summary
 
-        if hasattr(entry, 'media_content'):
+        if entry.get('media_content') and entry.media_content[0].get('url'):
             x = entry.media_content[0]['url']
             content = content + '<br><br><img src="' + x + '" width="800">'
 
         content = preprocess_links(content)  # Preprocess links
-        title = getattr(entry, 'title', entry.link)
+        title = entry.get('title', entry.link)
         create_email(entry.link, title, content, mailbox)
-        mark_seen(db, url, [entry.link])
 
-def errormailer(textexception):
+    return process_entries(fetch_feed(url), url, db, send_entry)
+
+def errormailer(textexception, subject="Fehler bei Skriptausführung"):
     message = MIMEMultipart("alternative")
-    message["Subject"] = "Fehler bei Skriptausführung"
+    message["Subject"] = subject
     message["From"] = sender_email
     message["To"] = receiver_email
     text = textexception
-    html = textexception
+    html = f"<pre>{html_lib.escape(textexception)}</pre>"
     part1 = MIMEText(text, "plain")
     part2 = MIMEText(html, "html")
     message.attach(part1)
@@ -402,25 +475,58 @@ def errormailer(textexception):
 
 
 
+def process_feed(section_dict, db):
+    """Process one feed and return a list of (entry link or None, error) that occurred."""
+    if section_dict.get('active') == "False":
+        return []
+    print(section_dict['imap-mailbox'])
+    if section_dict.get('fulltext') == "True":
+        failed = full_text2(section_dict['url'], section_dict['imap-mailbox'], db)
+    else:
+        failed = read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], db)
+    mailsort(section_dict['imap-mailbox'])
+    mailchecker(section_dict['imap-mailbox'])
+    return failed
+
+def format_feed_errors(section, section_dict, errors):
+    lines = [
+        "====================",
+        f"Feed: {section}",
+        f"URL: {section_dict.get('url', 'N/A')}",
+        f"Mailbox: {section_dict.get('imap-mailbox', 'N/A')}",
+        f"Volltext: {section_dict.get('fulltext', 'N/A')}",
+        "====================",
+    ]
+    for link, error in errors:
+        lines.append(f"\nArtikel: {link}" if link else "\nFehler beim Feed:")
+        lines.append(error)
+    return "\n".join(lines)
+
 def main():
     db = open_seen_db()
+    signal.signal(signal.SIGALRM, _feed_timeout)
+    failed_feeds = []
     for section in feedliste.sections():
         section_dict = dict(feedliste[section])
+        signal.alarm(FEED_TIMEOUT)
         try:
-            print(section_dict['imap-mailbox'])
-            if section_dict['active'] != "False":
-                if section_dict['fulltext'] == "True":
-                    full_text2(section_dict['url'], section_dict['imap-mailbox'], db)
-                else:
-                    read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], db)
-                mailsort(section_dict['imap-mailbox'])
-                mailchecker(section_dict['imap-mailbox'])
-            else:
-                pass    
+            errors = process_feed(section_dict, db)
         except Exception as e:
-            print(f"Error in section: {section}")
-            e_str = f"Error in feed section: {section}\nFeed URL: {section_dict.get('url', 'N/A')}\nException: {str(e)}"
-            errormailer(e_str)
+            print(f"Error in section {section}: {e}")
+            errors = [(None, traceback.format_exc())]
+        finally:
+            signal.alarm(0)
+        if errors:
+            failed_feeds.append((section, format_feed_errors(section, section_dict, errors)))
+
+    if failed_feeds:
+        names = ", ".join(section for section, _ in failed_feeds)
+        subject = f"Fehler bei Skriptausführung: {len(failed_feeds)} Feed(s) - {names}"
+        body = "\n\n".join(report for _, report in failed_feeds)
+        try:
+            errormailer(body, subject)
+        except Exception as e:
+            print(f"Error mail could not be sent: {e}\n{body}")
     print("Fertig")
         
 if __name__ == "__main__":
