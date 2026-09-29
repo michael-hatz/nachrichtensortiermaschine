@@ -13,7 +13,9 @@ import time
 import pandas as pd
 import os
 import trafilatura
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
+import re
+import difflib
 import markdown
 
 
@@ -47,36 +49,145 @@ receiver_email = mail_dict['SMTP']['receiver_email']
 password = mail_dict['SMTP']['password']
 
 def load_killfile():
-    """Load the killfile.txt into a list of phrases."""
+    """Load the killfile.txt into a list of phrases (paragraphs separated by blank lines)."""
     killfile_path = os.path.join(script_directory, "/app/data/killfile.txt")
     with open(killfile_path, "r", encoding="utf-8") as file:
-        # Split the file into paragraphs (phrases)
-        return [paragraph.strip() for paragraph in file.read().split("\n\n") if paragraph.strip()]
+        # Blank lines may contain spaces or \r (textarea in the web interface sends \r\n)
+        paragraphs = [p.strip() for p in re.split(r"\r?\n\s*\n", file.read()) if p.strip()]
+    phrases = []
+    for paragraph in paragraphs:
+        phrases.append(paragraph)
+        # Single lines of a multi-line block may show up as separate paragraphs in the article
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        if len(lines) > 1:
+            phrases.extend(lines)
+    return phrases
+
+
+URL_PATTERN = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+WORD_PATTERN = re.compile(r"\w+")
+BLOCK_TAGS = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "div", "td", "th",
+              "dd", "dt", "figcaption", "pre", "section", "article", "header", "footer", "aside"}
+KILL_MIN_WORDS = 5       # below this, a phrase must match exactly (word by word)
+KILL_MIN_RUN = 3         # only runs of at least this many identical words count as a match
+KILL_MATCH_RATIO = 0.85  # share of words that must match for a fuzzy match
+KILL_REST_RATIO = 0.2    # remove the whole paragraph if less than this share of words is left
+
+
+def _words(text):
+    """Return (lowercase word, start, end) for every word outside of URLs."""
+    urls = [m.span() for m in URL_PATTERN.finditer(text)]
+    words = []
+    for m in WORD_PATTERN.finditer(text):
+        if any(a <= m.start() < b for a, b in urls):
+            continue
+        words.append((m.group().lower(), m.start(), m.end()))
+    return words
+
+
+def _find_kill_spans(block_words, phrase_words):
+    """Return (first, last) word indices in the block matched by the phrase, or None."""
+    b, p = block_words, phrase_words
+    shorter = min(len(b), len(p))
+    if shorter == 0:
+        return None
+    if shorter < KILL_MIN_WORDS:
+        if len(b) < KILL_MIN_WORDS:
+            # Short paragraphs are only removed if they are exactly a killfile phrase
+            return (0, len(b) - 1) if b == p else None
+        # Short phrase: exact word sequence inside the paragraph
+        for i in range(len(b) - len(p) + 1):
+            if b[i:i + len(p)] == p:
+                return (i, i + len(p) - 1)
+        return None
+    # Cheap pre-check before the expensive comparison
+    if len(set(b) & set(p)) < KILL_MATCH_RATIO * len(set(b if len(b) <= len(p) else p)):
+        return None
+    matcher = difflib.SequenceMatcher(None, b, p, autojunk=False)
+    runs = [m for m in matcher.get_matching_blocks() if m.size >= KILL_MIN_RUN]
+    matched = sum(m.size for m in runs)
+    if matched < KILL_MATCH_RATIO * shorter:
+        return None
+    first, last = runs[0].a, runs[-1].a + runs[-1].size - 1
+    if last - first + 1 > 1.5 * len(p) + KILL_MIN_WORDS:
+        return None  # matches scattered over a much longer paragraph
+    return (first, last)
+
+
+def _cut_ranges(block, ranges):
+    """Remove the character ranges (relative to the block text) from the block's text nodes."""
+    offset = 0
+    for node in [s for s in block.find_all(string=True) if type(s) is NavigableString]:
+        text = str(node)
+        node_start, node_end = offset, offset + len(text)
+        offset = node_end
+        new_text = text
+        for start, end in sorted(ranges, reverse=True):
+            a, b = max(start, node_start) - node_start, min(end, node_end) - node_start
+            if a < b:
+                new_text = new_text[:a] + new_text[b:]
+        if new_text != text:
+            node.replace_with(new_text)
+    # Drop inline elements (links, bold, ...) that became empty
+    for tag in reversed(block.find_all(True)):
+        if tag.name not in ("img", "br") and not tag.find("img") and not tag.get_text(strip=True):
+            tag.decompose()
 
 
 def filter_killfile(content, killfile):
     """
-    Remove all phrases in the killfile from the content while preserving HTML formatting.
-    Handles phrases with or without HTML formatting in the content.
+    Remove all killfile phrases from the HTML content.
+    The comparison works paragraph by paragraph on words only, so it ignores case,
+    whitespace, punctuation, quotes, URLs and inline formatting/links, and tolerates
+    small differences in the text.
     """
-    # Parse the HTML content
     soup = BeautifulSoup(content, "html.parser")
+    phrases = [[w for w, _, _ in _words(phrase)] for phrase in killfile]
+    phrases = [p for p in phrases if p]
+    if not phrases:
+        return str(soup)
 
-    # Iterate over all text nodes in the HTML
-    for text_node in soup.find_all(string=True):
-        # Keep surrounding whitespace, otherwise spaces around links get lost
-        text = str(text_node)
-        for phrase in killfile:
-            # Normalize the killfile phrase
-            normalized_phrase = phrase.strip()
-            # Remove the killfile phrase from the text node
-            if normalized_phrase and normalized_phrase in text:
-                text = text.replace(normalized_phrase, "")
-        # Only touch nodes that actually changed
-        if text != text_node:
-            text_node.replace_with(text)
+    # Innermost block elements; without any, treat the whole content as one block
+    blocks = [tag for tag in soup.find_all(BLOCK_TAGS) if not tag.find(BLOCK_TAGS)] or [soup]
 
-    # Return the modified HTML as a string
+    for block in blocks:
+        text = "".join(s for s in block.find_all(string=True) if type(s) is NavigableString)
+        words = _words(text)
+        if not words:
+            continue
+        block_words = [w for w, _, _ in words]
+        covered = [False] * len(words)
+        for phrase_words in phrases:
+            span = _find_kill_spans(block_words, phrase_words)
+            if span:
+                for i in range(span[0], span[1] + 1):
+                    covered[i] = True
+        if not any(covered):
+            continue
+        if covered.count(False) < KILL_REST_RATIO * len(words):
+            block.decompose()
+            continue
+        # Turn covered word runs into character ranges, including adjacent punctuation/quotes
+        ranges = []
+        i = 0
+        while i < len(words):
+            if not covered[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(words) and covered[j + 1]:
+                j += 1
+            start, end = words[i][1], words[j][2]
+            while start > 0 and not text[start - 1].isspace() and not text[start - 1].isalnum():
+                start -= 1
+            while end < len(text) and not text[end].isspace() and not text[end].isalnum():
+                end += 1
+            ranges.append((start, end))
+            i = j + 1
+        _cut_ranges(block, ranges)
+        if not _words(block.get_text()) and not block.find("img"):
+            block.decompose()
+
     return str(soup)
 
 def preprocess_links(content):

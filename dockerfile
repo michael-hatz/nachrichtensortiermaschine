@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-venv \
     cron \
     curl \
     nano \
@@ -16,19 +17,18 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libxml2-dev \
     libxslt1-dev \
-    libz-dev \
+    zlib1g-dev \
     libx11-6 \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
-    libgtk-3-0 \
+    libgtk-3-0t64 \
     libdbus-glib-1-2 \
-    libgdk-pixbuf2.0-0 \
-    libxt6 \
+    libgdk-pixbuf-2.0-0 \
+    libxt6t64 \
     libnss3 \
     libnspr4 \
     tar \
-    sudo \
     pandoc \
     fonts-dejavu-core \
     tini \
@@ -40,8 +40,8 @@ RUN apt-get update && apt-get install -y \
     tar \
     libx11-xcb1 \
     libxcomposite1 \
-    libasound2 \
-    libgdk-pixbuf2.0-0 \
+    libasound2t64 \
+    libgdk-pixbuf-2.0-0 \
     curl \
     ca-certificates
 
@@ -55,8 +55,11 @@ RUN wget -O /tmp/firefox.tar.xz "https://download.mozilla.org/?product=firefox-l
     ln -s /opt/firefox/firefox /usr/local/bin/firefox && \
     rm /tmp/firefox.tar.xz
 
-# Install pip3 and selenium separately in another RUN command to catch any potential errors
-RUN python3 -m pip install --upgrade pip && \
+# Ubuntu >= 23.04 blocks system-wide pip installs (PEP 668), so use a virtualenv.
+# It is first in PATH, so "python3"/"pip3" resolve to the venv from here on.
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip3 install --upgrade pip && \
     pip3 install selenium
 
 # Copy your local geckodriver to the container
@@ -64,7 +67,7 @@ COPY src/files/geckodriver-v0.35.0-linux64.tar.gz /tmp/
 
 # Extract the geckodriver and move it to /usr/local/bin
 RUN tar -xzvf /tmp/geckodriver-v0.35.0-linux64.tar.gz -C /tmp && \
-    sudo mv /tmp/geckodriver /usr/local/bin/ && \
+    mv /tmp/geckodriver /usr/local/bin/ && \
     rm /tmp/geckodriver-v0.35.0-linux64.tar.gz
 
 # Set the working directory
