@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     tar \
     sudo \
     pandoc \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Install necessary dependencies

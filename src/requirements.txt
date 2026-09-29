@@ -10,6 +10,6 @@ selenium
 openai
 markdownify
 pypandoc
-xml2epub
+pillow
 flask
 
