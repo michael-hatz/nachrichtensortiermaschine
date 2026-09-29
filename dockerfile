@@ -2,6 +2,8 @@ FROM ubuntu:26.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
+# Local timezone incl. DST (CET/CEST); cron schedules in local time
+ENV TZ=Europe/Berlin
 
 # Update and install necessary packages, including python3-pip
 RUN apt-get update && apt-get install -y \
@@ -31,6 +33,9 @@ RUN apt-get update && apt-get install -y \
     tar \
     fonts-dejavu-core \
     tini \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Install necessary dependencies
