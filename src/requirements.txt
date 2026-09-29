@@ -1,7 +1,6 @@
 feedparser
 imap-tools
 requests
-pandas
 trafilatura
 beautifulsoup4
 markdown

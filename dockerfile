@@ -100,7 +100,6 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Copy default config files into persistent storage
 COPY src/config.cfg /app/data/
-COPY src/urls.tsv /app/data/
 COPY src/feeds.cfg /app/data/
 COPY src/filter.txt /app/data/
 COPY src/killfile.txt /app/data/

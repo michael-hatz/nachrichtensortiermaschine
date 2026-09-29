@@ -10,7 +10,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 import time
-import pandas as pd
+import sqlite3
+import csv
 import os
 import trafilatura
 from bs4 import BeautifulSoup, NavigableString
@@ -27,8 +28,9 @@ print(script_directory)
 feedliste = configparser.ConfigParser()
 feeddir =  os.path.join(script_directory, "/app/data/feeds.cfg")
 feedliste.read(feeddir)
-csv_file_path =  os.path.join(script_directory , "/app/data/urls.tsv")
-print(csv_file_path)
+db_file_path = "/app/data/nsm.db"
+legacy_tsv_path = "/app/data/urls.tsv"  # pre-SQLite list of mailed URLs, imported once
+print(db_file_path)
 
 #E-Mail-Configuration
 config = configparser.ConfigParser()
@@ -47,6 +49,9 @@ smtp_server = mail_dict['SMTP']['smtp_server']
 sender_email = mail_dict['SMTP']['sender_email']
 receiver_email = mail_dict['SMTP']['receiver_email']
 password = mail_dict['SMTP']['password']
+
+FIRST_RUN_ITEMS = 10    # a newly subscribed feed only mails its newest entries
+REQUEST_TIMEOUT = 60    # seconds for feed downloads and SMTP connections
 
 def load_killfile():
     """Load the killfile.txt into a list of phrases (paragraphs separated by blank lines)."""
@@ -256,7 +261,7 @@ def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     # Add header and send email
     message["X-Special-Header"] = mailbox
     context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, port) as server:
+    with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
         server.starttls(context=context)
         server.login(sender_email, password)
         server.sendmail(sender_email, receiver_email, message.as_string())
@@ -297,64 +302,85 @@ def mailchecker(Eingangsordner):
                 
                 mailbox.move(nachricht.uid, filterfolder)
 
-def full_text2(url, mailbox, seen_urls):
-    
-    feed = feedparser.parse(url)
-    for entry in feed.entries:
-        
-# ist neue URL bereits in Dataframe?
-        if entry.link not in seen_urls['URL'].values:
-            print(entry.link)
-            text_trafilatura = trafilatura.fetch_url(entry.link)
-            new_data = pd.DataFrame({'URL': [entry.link]})
-            seen_urls = pd.concat([seen_urls, new_data], ignore_index=True)
-            print("new_data:" , new_data)                
-            entry.content = [{'type': 'text/plain', 'language': None, 'base': '', 'value': 'Test'}]
-            if entry.content is not None and not isinstance(entry.content, Exception):
-                h = trafilatura.extract(text_trafilatura, include_comments=False, include_links=True, include_formatting=True)              
-                if h is not None:
-                    artikel_content = markdown.markdown(h)  # Convert to Markdown
-                    artikel_content = preprocess_links(artikel_content)  # Preprocess links
-                    create_email(entry.link, entry.title, artikel_content, mailbox)
-                else:
-                    print(f"Content extraction failed for {entry.link}")
-                    create_email(entry.link, entry.title, "Content could not be extracted.", mailbox)
-            else:
-            # Code to execute if text_trafilatura is None or an error
-                print("Text konnte nicht abgerufen werden oder None")
-            #trifalatura
-    seen_urls.to_csv(csv_file_path, sep='\t', index=False)  
+def open_seen_db():
+    """Open the database of mailed URLs, importing an old urls.tsv on first use."""
+    db = sqlite3.connect(db_file_path)
+    db.execute("""CREATE TABLE IF NOT EXISTS seen_urls (
+        url TEXT PRIMARY KEY,
+        feed TEXT,
+        seen_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+    if os.path.exists(legacy_tsv_path):
+        with open(legacy_tsv_path, newline="", encoding="utf-8") as file:
+            urls = [row['URL'] for row in csv.DictReader(file, delimiter='\t') if row.get('URL')]
+        with db:
+            db.executemany("INSERT OR IGNORE INTO seen_urls (url) VALUES (?)", [(url,) for url in urls])
+        os.rename(legacy_tsv_path, legacy_tsv_path + ".migrated")
+        print(f"Imported {len(urls)} URLs from {legacy_tsv_path}")
+    return db
 
-def read_rss_feed(url, mailbox, seen_urls):
-    #print("read_rss_feed" , url)
+def is_seen(db, url):
+    return db.execute("SELECT 1 FROM seen_urls WHERE url = ?", (url,)).fetchone() is not None
+
+def new_entries(feed, db, feed_url):
+    """Return the feed entries that haven't been mailed yet.
+
+    On the first run of a feed (none of its links are known) only the newest
+    FIRST_RUN_ITEMS entries are returned and the rest is marked as seen, so
+    subscribing to a feed with a long history doesn't send its whole archive.
+    """
+    entries = [entry for entry in feed.entries if entry.get('link')]
+    fresh = [entry for entry in entries if not is_seen(db, entry.link)]
+    if len(fresh) == len(entries) and len(entries) > FIRST_RUN_ITEMS:
+        print(f"First run of feed with {len(entries)} entries, mailing only the newest {FIRST_RUN_ITEMS}")
+        # Feeds are sorted newest first; if not, sort by date where available
+        if all(entry.get('published_parsed') for entry in entries):
+            entries.sort(key=lambda entry: entry.published_parsed, reverse=True)
+        mark_seen(db, feed_url, [entry.link for entry in entries[FIRST_RUN_ITEMS:]])
+        fresh = entries[:FIRST_RUN_ITEMS]
+    return fresh
+
+def mark_seen(db, feed_url, urls):
+    """Remember urls as mailed and commit right away, so an error later in the run doesn't resend them."""
+    with db:
+        db.executemany("INSERT OR IGNORE INTO seen_urls (url, feed) VALUES (?, ?)",
+                       [(url, feed_url) for url in urls])
+
+def full_text2(url, mailbox, db):
+    feed = feedparser.parse(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT).content)
+    for entry in new_entries(feed, db, url):
+        print(entry.link)
+        text_trafilatura = trafilatura.fetch_url(entry.link)
+        h = trafilatura.extract(text_trafilatura, include_comments=False, include_links=True, include_formatting=True)
+        if h is not None:
+            artikel_content = markdown.markdown(h)  # Convert to Markdown
+            artikel_content = preprocess_links(artikel_content)  # Preprocess links
+            create_email(entry.link, entry.title, artikel_content, mailbox)
+        else:
+            print(f"Content extraction failed for {entry.link}")
+            create_email(entry.link, entry.title, "Content could not be extracted.", mailbox)
+        mark_seen(db, url, [entry.link])
+
+def read_rss_feed(url, mailbox, db):
     #diese Nutzung von Feedparser ist, weil einige Seiten den Feedparser direkt blocken, bzw. requests ohne header
-    feed = feedparser.parse(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).content)
-    
-    for entry in feed.entries:
-    # Check if the new URL is already in the DataFrame
-        if entry.link not in seen_urls['URL'].values:
-            # Create a new DataFrame with the new URL
-            new_data = pd.DataFrame({'URL': [entry.link]})
-            #print("new_data:" , new_data)
-            # Concatenate the new DataFrame with the existing one
-            seen_urls = pd.concat([seen_urls, new_data], ignore_index=True)
-            content = "kein Content in Feed"
-            #title = getattr(entry, 'title', entry.link)
-            if hasattr(entry, 'content'):
-                content = entry.content
-                if hasattr(content[0], 'value'):
-                    content = content[0].value
-            else:
-                content = entry.summary
+    feed = feedparser.parse(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT).content)
 
-            if hasattr(entry, 'media_content'):
-                x = entry.media_content[0]['url']
-                content = content + '<br><br><img src="' + x + '" width="800">'
-            
-            content = preprocess_links(content)  # Preprocess links
-            title = getattr(entry, 'title', entry.link)
-            create_email(entry.link, title, content, mailbox)
-    seen_urls.to_csv(csv_file_path, sep='\t', index=False)
+    for entry in new_entries(feed, db, url):
+        content = "kein Content in Feed"
+        if hasattr(entry, 'content'):
+            content = entry.content
+            if hasattr(content[0], 'value'):
+                content = content[0].value
+        else:
+            content = entry.summary
+
+        if hasattr(entry, 'media_content'):
+            x = entry.media_content[0]['url']
+            content = content + '<br><br><img src="' + x + '" width="800">'
+
+        content = preprocess_links(content)  # Preprocess links
+        title = getattr(entry, 'title', entry.link)
+        create_email(entry.link, title, content, mailbox)
+        mark_seen(db, url, [entry.link])
 
 def errormailer(textexception):
     message = MIMEMultipart("alternative")
@@ -369,7 +395,7 @@ def errormailer(textexception):
     message.attach(part2)
 #absenden mail
     context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, port) as server:
+    with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
         server.starttls(context=context)
         server.login(sender_email, password)
         server.sendmail(sender_email, receiver_email, message.as_string())
@@ -377,16 +403,16 @@ def errormailer(textexception):
 
 
 def main():
+    db = open_seen_db()
     for section in feedliste.sections():
-        seen_urls = pd.read_csv(csv_file_path, sep='\t')
         section_dict = dict(feedliste[section])
         try:
             print(section_dict['imap-mailbox'])
             if section_dict['active'] != "False":
                 if section_dict['fulltext'] == "True":
-                    full_text2(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
+                    full_text2(section_dict['url'], section_dict['imap-mailbox'], db)
                 else:
-                    read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], seen_urls)
+                    read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], db)
                 mailsort(section_dict['imap-mailbox'])
                 mailchecker(section_dict['imap-mailbox'])
             else:
