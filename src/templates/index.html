@@ -284,6 +284,54 @@
         .action-item strong { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
         .file-pick { position: relative; overflow: hidden; }
         .file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        /* ---------- EPUB folder picker ---------- */
+        dialog.picker {
+            width: calc(100% - 32px); max-width: 480px; padding: 0;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+        }
+        dialog.picker::backdrop { background: rgba(10, 14, 20, .45); }
+        .picker-head, .picker-foot { padding: 16px 18px; }
+        .picker-head h3 { margin: 0 0 4px; }
+        .picker-head p { margin: 0; font-size: 13.5px; color: var(--muted); }
+        .picker-tools { display: flex; gap: 6px; margin-top: 12px; }
+        .picker-tools button { padding: 5px 10px; font-size: 13px; }
+        .picker-list { max-height: min(50vh, 420px); overflow-y: auto; border-block: 1px solid var(--border); padding: 6px 0; }
+        .picker-list label { display: flex; align-items: center; gap: 10px; padding: 7px 18px; font-size: 14px; cursor: pointer; word-break: break-word; }
+        .picker-list label:hover { background: var(--surface-2); }
+        .picker-list .empty { padding: 14px 18px; color: var(--muted); font-size: 14px; }
+        .picker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .picker-foot label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-right: auto; cursor: pointer; }
+        /* ---------- Setup wizard ---------- */
+        dialog.wizard { max-width: 560px; }
+        .wizard .picker-head { display: flex; align-items: flex-start; gap: 12px; }
+        .wizard .picker-head > div { flex: 1; }
+        .wizard .skip { background: none; color: var(--muted); padding: 2px 4px; font-size: 13px; text-decoration: underline; }
+        .wizard .skip:hover { background: none; color: var(--text); }
+        .wz-steps { display: flex; gap: 6px; list-style: none; margin: 12px 0 0; padding: 0; flex-wrap: wrap; }
+        .wz-steps li { font-size: 12.5px; color: var(--muted); padding: 2px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+        .wz-steps li.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-soft-hover); font-weight: 600; }
+        .wz-steps li.done { color: var(--success); }
+        .wz-body { border-top: 1px solid var(--border); padding: 16px 18px; max-height: min(62vh, 560px); overflow-y: auto; }
+        .wz-body > p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted); }
+        .wz-field { margin-bottom: 12px; }
+        .wz-field > label { display: block; font-size: 13px; font-weight: 550; color: var(--muted); margin-bottom: 4px; }
+        .wz-field input[type="text"], .wz-field input[type="password"], .wz-field input[type="email"], .wz-field input[type="number"] {
+            width: 100%; padding: 7px 10px; font: inherit; font-size: 14px; color: var(--text);
+            background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+        }
+        .wz-field input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+        .wz-field small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+        .wz-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+        .wz-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0 12px; cursor: pointer; }
+        .wz-note { font-size: 13px; background: var(--warn-soft); border-left: 3px solid var(--warn); border-radius: var(--radius-sm); padding: 8px 12px; margin: 0 0 14px; }
+        .wz-status { font-size: 13.5px; border-radius: var(--radius-sm); padding: 8px 12px; margin: 0 18px 14px; word-break: break-word; }
+        .wz-status:empty { display: none; }
+        .wz-status.error { background: var(--danger-soft); color: var(--danger); }
+        .wz-status.ok { background: var(--success-soft); color: var(--success); }
+        .wizard .picker-foot { border-top: 1px solid var(--border); }
+        .wizard .picker-foot .spacer { margin-right: auto; }
+        @media (max-width: 700px) { .wz-row { grid-template-columns: 1fr 90px; } }
         .file-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ---------- FAQ ---------- */
@@ -392,6 +440,7 @@
         <div id="config" class="tab-content active">
             <div class="tab-header">
                 <h2>Settings <span class="filename">config.cfg</span></h2>
+                <button type="button" class="secondary" onclick="openWizard()">Setup wizard</button>
                 <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="config"><span></span></span> Edit as text</label>
             </div>
             <div class="gui" id="config-gui"></div>
@@ -461,6 +510,14 @@
                         <div class="action-item">
                             <div><strong>Reading list as EPUB</strong><span>For e-readers</span></div>
                             <button type="button" class="secondary" onclick="downloadFile('download-epub', this)">Download</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Folders as EPUB</strong><span>Pick folders, one chapter each</span></div>
+                            <button type="button" class="secondary" id="epub-folders-open" onclick="openFolderPicker()">Choose…</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>All unread mails as EPUB</strong><span>Whole mailbox, one chapter per folder</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-epub?all=1&unread=1', this)">Download</button>
                         </div>
                     </div>
                 </section>
@@ -573,6 +630,107 @@ Currently not functional</pre>
         Nachrichtensortiermaschine · <a href="https://github.com/michael-hatz/nachrichtensortiermaschine" target="_blank" rel="noopener">GitHub</a>
     </footer>
     <div class="toasts" id="toasts" aria-live="polite"></div>
+
+    <dialog class="picker wizard" id="wizard" aria-labelledby="wizard-title">
+        <div class="picker-head">
+            <div>
+                <h3 id="wizard-title">Set up your mail account</h3>
+                <ol class="wz-steps" id="wz-steps">
+                    <li>Mailbox</li><li>Sending</li><li>Folders</li><li>Read-later</li>
+                </ol>
+            </div>
+            <button type="button" class="skip" onclick="closeWizard()">Set up later</button>
+        </div>
+
+        <div class="wz-body" data-step="0">
+            <p>Nachrichtensortiermaschine delivers your feed articles as mails. Which mailbox should they go to?</p>
+            <div class="wz-field"><label for="wz-email">Email address</label>
+                <input type="email" id="wz-email" autocomplete="off" placeholder="you@example.org"></div>
+            <div class="wz-field"><label for="wz-password">Password</label>
+                <input type="password" id="wz-password" autocomplete="new-password">
+                <small>Some providers (e.g. Gmail) need an app password here.</small></div>
+            <div class="wz-field"><label for="wz-imap-host">IMAP server</label>
+                <input type="text" id="wz-imap-host" data-auto="imap" autocomplete="off">
+                <small>Connected via SSL on port 993.</small></div>
+            <div class="wz-field"><label for="wz-imap-user">Login</label>
+                <input type="text" id="wz-imap-user" data-auto="email" autocomplete="off"></div>
+        </div>
+
+        <div class="wz-body" data-step="1" hidden>
+            <p>Articles are sent to you by mail. How should they be sent?</p>
+            <div class="wz-row">
+                <div class="wz-field"><label for="wz-smtp-host">SMTP server</label>
+                    <input type="text" id="wz-smtp-host" data-auto="smtp" autocomplete="off"></div>
+                <div class="wz-field"><label for="wz-smtp-port">Port</label>
+                    <input type="number" id="wz-smtp-port" value="587" min="1" max="65535"></div>
+            </div>
+            <div class="wz-field"><label for="wz-smtp-user">Login / sender address</label>
+                <input type="text" id="wz-smtp-user" data-auto="email" autocomplete="off">
+                <small>Connected with STARTTLS (usually port 587).</small></div>
+            <label class="wz-check"><input type="checkbox" id="wz-same-password" checked> Same password as the mailbox</label>
+            <div class="wz-field" id="wz-smtp-password-field" hidden><label for="wz-smtp-password">SMTP password</label>
+                <input type="password" id="wz-smtp-password" autocomplete="new-password"></div>
+            <div class="wz-field"><label for="wz-receiver">Deliver articles to</label>
+                <input type="email" id="wz-receiver" data-auto="email" autocomplete="off">
+                <small>Usually the mailbox from step 1, so the articles can be sorted into its folders.</small></div>
+        </div>
+
+        <div class="wz-body" data-step="2" hidden>
+            <p>Two folders in your mailbox. Missing folders are created when you save.</p>
+            <div class="wz-field"><label for="wz-unread">Read-later folder</label>
+                <input type="text" id="wz-unread" list="wz-folder-list" autocomplete="off">
+                <small>The TXT and EPUB reading lists are built from this folder.</small></div>
+            <div class="wz-field"><label for="wz-filter">Folder for filtered mails</label>
+                <input type="text" id="wz-filter" list="wz-folder-list" autocomplete="off">
+                <small>Articles matching your filter are moved here, e.g. the trash.</small></div>
+            <datalist id="wz-folder-list"></datalist>
+        </div>
+
+        <div class="wz-body" data-step="3" hidden>
+            <p>Optional: a separate address you forward links to. Every link in its inbox is fetched as a full article and sent to you.</p>
+            <label class="wz-check"><input type="checkbox" id="wz-readlater"> Set up a read-later mailbox</label>
+            <div id="wz-readlater-fields" hidden>
+                <p class="wz-note">Use a dedicated address, not your main mailbox: every mail in its inbox is processed and moved to the folder “Archiv”.</p>
+                <div class="wz-field"><label for="wz-rl-email">Email address / login</label>
+                    <input type="email" id="wz-rl-email" autocomplete="off"></div>
+                <div class="wz-field"><label for="wz-rl-password">Password</label>
+                    <input type="password" id="wz-rl-password" autocomplete="new-password"></div>
+                <div class="wz-field"><label for="wz-rl-imap-host">IMAP server</label>
+                    <input type="text" id="wz-rl-imap-host" data-auto="rl-imap" autocomplete="off"></div>
+                <div class="wz-row">
+                    <div class="wz-field"><label for="wz-rl-smtp-host">SMTP server</label>
+                        <input type="text" id="wz-rl-smtp-host" data-auto="rl-smtp" autocomplete="off"></div>
+                    <div class="wz-field"><label for="wz-rl-smtp-port">Port</label>
+                        <input type="number" id="wz-rl-smtp-port" value="587" min="1" max="65535"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="wz-status" id="wz-status" role="status"></div>
+        <div class="picker-foot">
+            <button type="button" class="ghost" id="wz-back">Back</button>
+            <span class="spacer"></span>
+            <button type="button" class="ghost" id="wz-anyway" hidden>Continue anyway</button>
+            <button type="button" id="wz-next">Next</button>
+        </div>
+    </dialog>
+
+    <dialog class="picker" id="epub-folders" aria-labelledby="epub-folders-title">
+        <div class="picker-head">
+            <h3 id="epub-folders-title">Folders as EPUB</h3>
+            <p>Each folder becomes a chapter with its mails as sub-chapters. Mails aren't marked as read.</p>
+            <div class="picker-tools">
+                <button type="button" class="ghost" onclick="selectAllFolders(true)">Select all</button>
+                <button type="button" class="ghost" onclick="selectAllFolders(false)">Select none</button>
+            </div>
+        </div>
+        <div class="picker-list" id="epub-folder-list"><div class="empty">Loading folders…</div></div>
+        <div class="picker-foot">
+            <label><input type="checkbox" id="epub-unread-only"> Only unread mails</label>
+            <button type="button" class="ghost" onclick="document.getElementById('epub-folders').close()">Cancel</button>
+            <button type="button" id="epub-folders-download" onclick="downloadFolders()" disabled>Download</button>
+        </div>
+    </dialog>
 
     <script>
         // ---------- Tabs ----------
@@ -1054,10 +1212,275 @@ Currently not functional</pre>
         // Folder suggestions from the feed mailbox; the GUI works without them
         const folderList = el('datalist', { id: 'imap-folders' });
         document.body.append(folderList);
-        fetch('/api/folders')
-            .then(response => response.ok ? response.json() : [])
+        const imapFolders = fetch('/api/folders')
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.error || 'Could not load folders');
+                return data;
+            }));
+        imapFolders
             .then(folders => folders.forEach(name => folderList.append(el('option', { value: name }))))
             .catch(() => {});
+
+        // ---------- Setup wizard ----------
+        const NEEDS_SETUP = {{ needs_setup | tojson }};
+        const wizard = document.getElementById('wizard');
+        const wz = id => document.getElementById('wz-' + id);
+        const wzSteps = [...wizard.querySelectorAll('.wz-body[data-step]')];
+        const wzLabels = [...document.querySelectorAll('#wz-steps li')];
+        let wzStep = 0;
+
+        // Server names of common providers; everything else is guessed as imap./smtp.<domain>
+        const PROVIDERS = {
+            'gmx.de': ['imap.gmx.net', 'mail.gmx.net'], 'gmx.net': ['imap.gmx.net', 'mail.gmx.net'],
+            'web.de': ['imap.web.de', 'smtp.web.de'],
+            't-online.de': ['secureimap.t-online.de', 'securesmtp.t-online.de'],
+            'outlook.com': ['outlook.office365.com', 'smtp.office365.com'],
+            'hotmail.com': ['outlook.office365.com', 'smtp.office365.com'],
+            'icloud.com': ['imap.mail.me.com', 'smtp.mail.me.com'], 'me.com': ['imap.mail.me.com', 'smtp.mail.me.com'],
+            'posteo.de': ['posteo.de', 'posteo.de'],
+        };
+        function guessServers(email) {
+            const domain = (email.split('@')[1] || '').trim().toLowerCase();
+            if (!domain) return ['', ''];
+            return PROVIDERS[domain] || ['imap.' + domain, 'smtp.' + domain];
+        }
+
+        // Derived fields follow the email address until the user edits them
+        function autofill() {
+            const email = wz('email').value.trim();
+            const [imap, smtp] = guessServers(email);
+            const [rlImap, rlSmtp] = guessServers(wz('rl-email').value.trim());
+            const values = { email, imap, smtp, 'rl-imap': rlImap, 'rl-smtp': rlSmtp };
+            wizard.querySelectorAll('[data-auto]').forEach(input => {
+                if (!input.dataset.touched) input.value = values[input.dataset.auto];
+            });
+        }
+        // an emptied field goes back to its automatic value
+        wizard.querySelectorAll('input').forEach(input =>
+            input.addEventListener('input', () => { input.dataset.touched = input.value ? '1' : ''; }));
+        wz('email').addEventListener('input', autofill);
+        wz('rl-email').addEventListener('input', autofill);
+        wz('same-password').addEventListener('change', e => { wz('smtp-password-field').hidden = e.target.checked; });
+        wz('readlater').addEventListener('change', e => { wz('readlater-fields').hidden = !e.target.checked; });
+
+        function wzStatus(message, type) {
+            wz('status').textContent = message || '';
+            wz('status').className = 'wz-status ' + (type || '');
+        }
+
+        function showWizardStep(step) {
+            wzStep = step;
+            wzSteps.forEach((body, i) => { body.hidden = i !== step; });
+            wzLabels.forEach((li, i) => {
+                li.classList.toggle('active', i === step);
+                li.classList.toggle('done', i < step);
+            });
+            wz('back').hidden = step === 0;
+            wz('next').textContent = step === wzSteps.length - 1 ? 'Save' : 'Next';
+            wz('anyway').hidden = true;
+            wzStatus('');
+            const first = wzSteps[step].querySelector('input');
+            if (first) first.focus();
+        }
+
+        // Prefill from config.cfg, unless it only holds the example values
+        function prefillWizard() {
+            if (NEEDS_SETUP) return;
+            const sections = Object.fromEntries(parseIni(field('config').value)
+                .map(section => [section.name, Object.fromEntries(section.entries.map(e => [e.key.toLowerCase(), e.value.replace(/%%/g, '%')]))]));
+            const get = (section, key) => (sections[section] || {})[key.toLowerCase()] || '';
+            const set = (id, value) => { if (value) { wz(id).value = value; wz(id).dataset.touched = '1'; } };
+            set('email', get('SMTP', 'receiver_email') || get('IMAP', 'imapUser'));
+            set('password', get('IMAP', 'imapPasscode'));
+            set('imap-host', get('IMAP', 'imapHost'));
+            set('imap-user', get('IMAP', 'imapUser'));
+            set('smtp-host', get('SMTP', 'smtp_server'));
+            set('smtp-port', get('SMTP', 'port').trim());
+            set('smtp-user', get('SMTP', 'sender_email'));
+            set('receiver', get('SMTP', 'receiver_email'));
+            const smtpPassword = get('SMTP', 'password');
+            if (smtpPassword && smtpPassword !== get('IMAP', 'imapPasscode')) {
+                wz('same-password').checked = false;
+                wz('smtp-password-field').hidden = false;
+                set('smtp-password', smtpPassword);
+            }
+            set('unread', get('Mailings', 'unread_folder'));
+            set('filter', get('options', 'filterfolder'));
+            const rlHost = get('IMAP-Artikelpostfach', 'imapHost');
+            if (rlHost && !rlHost.toLowerCase().endsWith('example.com')) {
+                wz('readlater').checked = true;
+                wz('readlater-fields').hidden = false;
+                set('rl-email', get('IMAP-Artikelpostfach', 'imapUser'));
+                set('rl-password', get('IMAP-Artikelpostfach', 'imapPasscode'));
+                set('rl-imap-host', rlHost);
+                set('rl-smtp-host', get('SMTP-Artikelpostfach', 'smtp_server'));
+                set('rl-smtp-port', get('SMTP-Artikelpostfach', 'port').trim());
+            }
+        }
+
+        function openWizard() {
+            showWizardStep(0);
+            wizard.showModal();
+        }
+        function closeWizard() {
+            wizard.close();
+            try { sessionStorage.setItem('nsm-wizard-skipped', '1'); } catch (e) {}
+        }
+        wizard.addEventListener('cancel', () => {
+            try { sessionStorage.setItem('nsm-wizard-skipped', '1'); } catch (e) {}
+        });
+
+        function testLogin(params) {
+            return fetch('/api/setup/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
+            }).then(response => response.json()).then(result => {
+                if (!result.ok) throw new Error(result.error);
+                return result;
+            });
+        }
+
+        const smtpPassword = () => wz('same-password').checked ? wz('password').value : wz('smtp-password').value;
+        const REQUIRED = [
+            ['email', 'password', 'imap-host', 'imap-user'],
+            ['smtp-host', 'smtp-port', 'smtp-user', 'receiver'],
+            ['unread', 'filter'],
+            [],
+        ];
+
+        // An input problem, as opposed to a failed connection test (which the user may skip)
+        function invalid(message, input) {
+            if (input) input.focus();
+            return Promise.reject(Object.assign(new Error(message), { invalid: true }));
+        }
+
+        // Checks the current step; resolves when it is fine, rejects with a message otherwise
+        function checkStep(step) {
+            const missing = REQUIRED[step].find(id => !wz(id).value.trim());
+            if (missing) return invalid('Please fill in all fields.', wz(missing));
+            if (step === 1 && !wz('same-password').checked && !wz('smtp-password').value) return invalid('Please enter the SMTP password.', wz('smtp-password'));
+            if (step === 0) {
+                return testLogin({ kind: 'imap', host: wz('imap-host').value.trim(), user: wz('imap-user').value.trim(), password: wz('password').value })
+                    .then(result => {
+                        wz('folder-list').replaceChildren(...result.folders.map(name => el('option', { value: name })));
+                        // sensible folder defaults for a new setup, using the server's folder separator
+                        if (!wz('unread').dataset.touched) wz('unread').value = result.inbox + result.delim + 'artikel_unread';
+                        if (!wz('filter').dataset.touched) wz('filter').value = result.trash || 'Trash';
+                    });
+            }
+            if (step === 1) {
+                return testLogin({ kind: 'smtp', host: wz('smtp-host').value.trim(), port: wz('smtp-port').value, user: wz('smtp-user').value.trim(), password: smtpPassword() });
+            }
+            if (step === 3 && wz('readlater').checked) {
+                const missingRl = ['rl-email', 'rl-password', 'rl-imap-host', 'rl-smtp-host', 'rl-smtp-port'].find(id => !wz(id).value.trim());
+                if (missingRl) return invalid('Please fill in all fields of the read-later mailbox.', wz(missingRl));
+                const same = wz('rl-email').value.trim().toLowerCase() === wz('imap-user').value.trim().toLowerCase()
+                          && wz('rl-imap-host').value.trim().toLowerCase() === wz('imap-host').value.trim().toLowerCase();
+                if (same) return invalid('The read-later mailbox must not be your main mailbox: every mail in its inbox would be moved to “Archiv”.', wz('rl-email'));
+                return testLogin({ kind: 'imap', host: wz('rl-imap-host').value.trim(), user: wz('rl-email').value.trim(), password: wz('rl-password').value })
+                    .then(() => testLogin({ kind: 'smtp', host: wz('rl-smtp-host').value.trim(), port: wz('rl-smtp-port').value, user: wz('rl-email').value.trim(), password: wz('rl-password').value }));
+            }
+            return Promise.resolve();
+        }
+
+        function saveWizard() {
+            const data = {
+                imap: { host: wz('imap-host').value.trim(), user: wz('imap-user').value.trim(), password: wz('password').value },
+                smtp: { host: wz('smtp-host').value.trim(), port: wz('smtp-port').value.trim(), user: wz('smtp-user').value.trim(),
+                        password: smtpPassword(), receiver: wz('receiver').value.trim() },
+                folders: { unread: wz('unread').value.trim(), filter: wz('filter').value.trim() },
+                readlater: wz('readlater').checked ? {
+                    user: wz('rl-email').value.trim(), password: wz('rl-password').value, imap_host: wz('rl-imap-host').value.trim(),
+                    smtp_host: wz('rl-smtp-host').value.trim(), smtp_port: wz('rl-smtp-port').value.trim(),
+                } : null,
+            };
+            return fetch('/api/setup', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+            }).then(response => response.json().then(result => {
+                if (!response.ok) throw new Error(result.error || 'Saving failed');
+                let message = 'Mail account saved.';
+                if (result.created_folders.length) message += ' Created mail folders: ' + result.created_folders.join(', ');
+                if (result.folder_error) message += ' Could not create the folders: ' + result.folder_error;
+                // config.cfg changed on the server: reload so the editor shows it
+                try { sessionStorage.setItem('nsm-toast', message); } catch (e) {}
+                dirty = false;
+                location.reload();
+            }));
+        }
+
+        function advanceWizard() {
+            if (wzStep < wzSteps.length - 1) {
+                showWizardStep(wzStep + 1);
+                return Promise.resolve();
+            }
+            return saveWizard();
+        }
+
+        wz('next').addEventListener('click', () => {
+            const button = wz('next');
+            if (wzStep === wzSteps.length - 1 && dirty && !confirm('Saving reloads the page and discards your other unsaved changes. Continue?')) return;
+            setBusy(button, true);
+            wz('anyway').hidden = true;
+            wzStatus(wzStep === 0 || wzStep === 1 || (wzStep === 3 && wz('readlater').checked) ? 'Testing connection…' : '');
+            checkStep(wzStep)
+                .then(() => advanceWizard())
+                .catch(error => {
+                    wzStatus((error.invalid ? '' : 'Connection failed: ') + error.message, 'error');
+                    wz('anyway').hidden = !!error.invalid;  // e.g. the server blocks the test but the settings are right
+                })
+                .finally(() => setBusy(button, false));
+        });
+        wz('anyway').addEventListener('click', () => {
+            setBusy(wz('anyway'), true);
+            advanceWizard()
+                .catch(error => wzStatus(error.message, 'error'))
+                .finally(() => setBusy(wz('anyway'), false));
+        });
+        wz('back').addEventListener('click', () => showWizardStep(wzStep - 1));
+        wizard.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') {
+                e.preventDefault();
+                wz('next').click();
+            }
+        });
+
+        prefillWizard();
+        let wizardSkipped = false;
+        try { wizardSkipped = !!sessionStorage.getItem('nsm-wizard-skipped'); } catch (e) {}
+        if (NEEDS_SETUP && !wizardSkipped) openWizard();
+
+        // ---------- EPUB folder picker ----------
+        const folderPicker = document.getElementById('epub-folders');
+        const pickerList = document.getElementById('epub-folder-list');
+        const pickerDownload = document.getElementById('epub-folders-download');
+        const pickedFolders = () => [...pickerList.querySelectorAll('input:checked')].map(box => box.value);
+        const updatePicker = () => { pickerDownload.disabled = !pickedFolders().length; };
+        pickerList.addEventListener('change', updatePicker);
+
+        function openFolderPicker() {
+            folderPicker.showModal();
+            if (pickerList.dataset.loaded) return;
+            imapFolders
+                .then(folders => {
+                    pickerList.replaceChildren(...(folders.length
+                        ? folders.map(name => el('label', {}, [el('input', { type: 'checkbox', value: name }), name]))
+                        : [el('div', { class: 'empty' }, ['No folders found.'])]));
+                    pickerList.dataset.loaded = '1';
+                })
+                .catch(error => pickerList.replaceChildren(el('div', { class: 'empty' }, ['Could not load folders: ' + error.message])));
+        }
+
+        function selectAllFolders(checked) {
+            pickerList.querySelectorAll('input').forEach(box => { box.checked = checked; });
+            updatePicker();
+        }
+
+        function downloadFolders() {
+            const params = new URLSearchParams();
+            pickedFolders().forEach(name => params.append('folder', name));
+            if (document.getElementById('epub-unread-only').checked) params.append('unread', '1');
+            folderPicker.close();
+            downloadFile('download-epub?' + params, document.getElementById('epub-folders-open'));
+        }
 
         window.addEventListener('beforeunload', e => {
             if (dirty) { e.preventDefault(); e.returnValue = ''; }

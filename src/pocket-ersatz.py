@@ -57,6 +57,10 @@ firefox_options.binary_location = "/usr/local/bin/firefox"
 
 driver = None
 
+# Max. Laufzeit pro Durchgang: Der Cronjob beendet Firefox um :15, pocket-ersatz startet um :36.
+# Was nicht mehr in die Zeit passt, bleibt im Posteingang und kommt beim nächsten Lauf dran.
+MAX_RUNTIME = 30 * 60  # Sekunden
+
 def start_driver():
     driver_service = webdriver.FirefoxService(executable_path=geckodriver_path)
     d = webdriver.Firefox(options=firefox_options, service=driver_service)
@@ -134,9 +138,13 @@ def getarticleandsendmail(artikel):
     print("Mail gesendet")
     
 #durchsuche Mail
+start = time.monotonic()
 try:
     with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
         for nachricht in mailbox.fetch(bulk=True):
+            if time.monotonic() - start > MAX_RUNTIME:
+                print("Zeitlimit erreicht, restliche Mails beim nächsten Lauf")
+                break
             emailinhalt = nachricht.text or nachricht.html
             #mailbox.delete(nachricht.uid)
             mailbox.move(nachricht.uid, 'Archiv')
@@ -155,8 +163,13 @@ try:
                     getarticleandsendmail(m)
                 except Exception as e:
                     print("Fehler bei " + m + ": " + str(e))
+                    # Firefox könnte hängen oder abgestürzt sein: für den nächsten Artikel neu starten
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    driver = None
             print("m erledigt")
-            sys.exit()
 finally:
     # Firefox + geckodriver immer beenden, auch bei Fehlern oder sys.exit()
     if driver is not None:

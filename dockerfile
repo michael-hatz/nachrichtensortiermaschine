@@ -80,6 +80,7 @@ WORKDIR /app
 # Copy application code
 COPY src/requirements.txt ./
 COPY src/nsm.py ./
+COPY src/mailtext.py ./
 COPY src/pocket-ersatz.py ./
 COPY src/pocket-mailer.py ./
 COPY src/pocket-mailer-epub.py ./
@@ -104,6 +105,9 @@ COPY src/config.cfg /app/data/
 COPY src/feeds.cfg /app/data/
 COPY src/filter.txt /app/data/
 COPY src/killfile.txt /app/data/
+
+# Pristine copies; the web app restores them if the mounted volume lacks them
+COPY src/config.cfg src/feeds.cfg src/filter.txt src/killfile.txt /app/defaults/
 
 # Declare persistent volume
 VOLUME ["/app/data"]

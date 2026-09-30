@@ -3,19 +3,43 @@ import os
 import subprocess
 import configparser
 import io
+import re
 import shutil
+import smtplib
+import socket
 import tempfile
 from datetime import date
 from xml.etree.ElementTree import Element, SubElement, tostring, ElementTree
 from werkzeug.utils import secure_filename
 from imap_tools import MailBox
+from imap_tools.errors import MailboxLoginError
 
 app = Flask(__name__)
 UPLOAD_FOLDER = '/app/data/'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+DEFAULTS_FOLDER = '/app/defaults/'  # pristine copies of the data files, see dockerfile
+CONFIG_PATH = '/app/data/config.cfg'
+DATA_FILES = ['config.cfg', 'feeds.cfg', 'filter.txt', 'killfile.txt']
+
+def ensure_data_files():
+    """Copy the default data files into /app/data if they are missing (e.g. an empty volume
+    hides the files the image put there)."""
+    for name in DATA_FILES:
+        target = os.path.join(UPLOAD_FOLDER, name)
+        source = os.path.join(DEFAULTS_FOLDER, name)
+        if not os.path.exists(target) and os.path.exists(source):
+            shutil.copyfile(source, target)
+
+def needs_setup():
+    """True if config.cfg has no real mail account yet (missing or still the example values)."""
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(CONFIG_PATH, encoding='utf-8')
+    host = config.get('IMAP', 'imapHost', fallback='').strip().lower()
+    return not host or host.endswith('example.com')
 
 @app.route('/')
 def index():
+    ensure_data_files()
     # Read the contents of the files with utf-8 encoding
     config_content = read_file('/app/data/config.cfg')
     feeds_content = read_file('/app/data/feeds.cfg')
@@ -37,7 +61,8 @@ def index():
         feeds=feeds_content,
         filter=filter_content,
         killfile=killfile_content,  # Pass killfile content to the template
-        crontab=crontab_content  # Pass crontab content to the template
+        crontab=crontab_content,  # Pass crontab content to the template
+        needs_setup=needs_setup()
     )
 
 @app.route('/', methods=['POST'])
@@ -127,11 +152,11 @@ def send_epub():
     except subprocess.CalledProcessError as e:
         return f"Error sending EPUB emails: {e}", 500
 
-def generate_download(script, filename, download_name, mimetype):
+def generate_download(script, filename, download_name, mimetype, extra_args=()):
     """Run a mailer script with --no-mail in a temp dir and return the generated file."""
     workdir = tempfile.mkdtemp()
     try:
-        subprocess.run(['python3', script, '--no-mail'], cwd=workdir, check=True)
+        subprocess.run(['python3', script, '--no-mail', *extra_args], cwd=workdir, check=True)
         with open(os.path.join(workdir, filename), 'rb') as f:
             data = io.BytesIO(f.read())
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -147,8 +172,39 @@ def download_txt():
 
 @app.route('/download-epub', methods=['GET'])
 def download_epub():
+    """EPUB of the read-later folder, or with ?folder=...&folder=... of the chosen folders,
+    or with ?all=1 of all folders; &unread=1 limits it to unread mails."""
+    args, name = [], "Leseliste"
+    if request.args.get('all') == '1':
+        args.append('--all-folders')
+    else:
+        for folder in request.args.getlist('folder'):
+            args.append(f'--folder={folder}')  # "=" so folder names starting with "-" aren't options
+    if args and request.args.get('unread') == '1':
+        args.append('--unread')
+        name = "Ungelesen"
     return generate_download('/app/pocket-mailer-epub.py', 'Leseliste.epub',
-                             f"Leseliste-{date.today():%Y%m%d}.epub", 'application/epub+zip')
+                             f"{name}-{date.today():%Y%m%d}.epub", 'application/epub+zip', args)
+
+def create_missing_folders(mailbox, names):
+    """Create and subscribe the folders that don't exist yet; returns the created names.
+    "INBOX" is case-insensitive in IMAP, so "Inbox/x" and "INBOX/x" are the same folder."""
+    folders = mailbox.folder.list()
+    delim = next((f.delim for f in folders if f.delim), '/')
+
+    def key(name):
+        head, sep, rest = name.partition(delim)
+        return (head.upper() if head.upper() == 'INBOX' else head) + sep + rest
+
+    existing = {key(folder.name) for folder in folders}
+    created = []
+    for name in dict.fromkeys(n.strip() for n in names):
+        if name and key(name) not in existing:
+            mailbox.folder.create(name)
+            mailbox.folder.subscribe(name, True)
+            existing.add(key(name))
+            created.append(name)
+    return created
 
 def create_missing_feed_folders():
     """Create the IMAP folders referenced by imap-mailbox in feeds.cfg that don't exist yet.
@@ -166,14 +222,124 @@ def create_missing_feed_folders():
     try:
         imap = config['IMAP']
         with MailBox(imap['imapHost'], timeout=15).login(imap['imapUser'], imap['imapPasscode'], initial_folder=None) as mailbox:
-            existing = {folder.name for folder in mailbox.folder.list()}
-            for name in sorted(wanted - existing):
-                mailbox.folder.create(name)
-                mailbox.folder.subscribe(name, True)
-                created.append(name)
+            created = create_missing_folders(mailbox, sorted(wanted))
     except Exception as e:
         return created, str(e)
     return created, None
+
+# ---------- Setup wizard ----------
+
+def check_imap(host, user, password):
+    """Log in the way the scripts do (IMAP over SSL, port 993) and describe the mailbox:
+    folder names, the folder separator, the inbox's spelling and the trash folder (if flagged)."""
+    with MailBox(host, timeout=15).login(user, password, initial_folder=None) as mailbox:
+        folders = mailbox.folder.list()
+    inbox = next((f for f in folders if f.name.upper() == 'INBOX'), None)
+    trash = next((f.name for f in folders if '\\trash' in (flag.lower() for flag in f.flags)), '')
+    return {
+        'folders': sorted(f.name for f in folders),
+        'delim': ((inbox or folders[0]).delim if folders else None) or '/',
+        'inbox': inbox.name if inbox else 'INBOX',
+        'trash': trash,
+    }
+
+def check_smtp(host, port, user, password):
+    """Log in the way the scripts do (SMTP with STARTTLS)."""
+    with smtplib.SMTP(host, int(port), timeout=15) as server:
+        server.starttls()
+        server.login(user, password)
+
+@app.route('/api/setup/test', methods=['POST'])
+def setup_test():
+    """Test the IMAP or SMTP login entered in the setup wizard."""
+    data = request.get_json(force=True)
+    try:
+        if data.get('kind') == 'imap':
+            return jsonify({'ok': True, **check_imap(data['host'], data['user'], data['password'])})
+        check_smtp(data['host'], data.get('port') or 587, data['user'], data['password'])
+        return jsonify({'ok': True})
+    except (MailboxLoginError, smtplib.SMTPAuthenticationError):
+        return jsonify({'ok': False, 'error': 'Login failed. Please check login and password.'})
+    except socket.gaierror:
+        return jsonify({'ok': False, 'error': f"Server {data.get('host')} not found."})
+    except (socket.timeout, ConnectionRefusedError):
+        return jsonify({'ok': False, 'error': f"No answer from {data.get('host')}. Please check server and port."})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e) or type(e).__name__})
+
+def set_ini_values(text, updates):
+    """Set {section: {key: value}} in the INI text, keeping comments, order and key spelling.
+    Missing keys are appended to their section, missing sections to the end."""
+    lines = text.splitlines()
+    pending = {section: dict(values) for section, values in updates.items()}
+    section, section_end = None, {}
+    for i, line in enumerate(lines):
+        header = re.match(r'^\s*\[(.+)\]\s*$', line)
+        if header:
+            section = header.group(1).strip()
+            section_end[section] = i + 1
+            continue
+        if section is None:
+            continue
+        if line.strip():
+            section_end[section] = i + 1
+        kv = re.match(r'^(\s*)([^=:\s][^=:]*?)(\s*[=:]\s*)(.*?)\s*$', line)
+        if kv and section in pending:
+            for key in list(pending[section]):
+                if key.lower() == kv.group(2).lower():
+                    lines[i] = kv.group(1) + kv.group(2) + kv.group(3) + pending[section].pop(key)
+    # insert from the bottom up so earlier positions stay valid
+    for section in sorted((s for s in pending if s in section_end), key=section_end.get, reverse=True):
+        lines[section_end[section]:section_end[section]] = [f"{key} = {value}" for key, value in pending[section].items()]
+    for section, values in pending.items():
+        if section not in section_end:
+            lines += ['', f'[{section}]'] + [f"{key} = {value}" for key, value in values.items()]
+    return '\n'.join(lines) + '\n'
+
+def ini_value(value):
+    """Make a wizard value safe for config.cfg: one line, and "%" escaped for configparser's
+    interpolation, which the scripts use when reading the file."""
+    return re.sub(r'[\r\n]+', '', str(value)).strip().replace('%', '%%')
+
+@app.route('/api/setup', methods=['POST'])
+def setup_save():
+    """Write the mail settings from the setup wizard into config.cfg."""
+    data = request.get_json(force=True)
+    try:
+        imap, smtp, folders = data['imap'], data['smtp'], data['folders']
+        updates = {
+            'IMAP': {'imapHost': imap['host'], 'imapUser': imap['user'], 'imapPasscode': imap['password']},
+            'SMTP': {'port': smtp['port'], 'smtp_server': smtp['host'], 'sender_email': smtp['user'],
+                     'receiver_email': smtp['receiver'], 'password': smtp['password']},
+            'Mailings': {'unread_folder': folders['unread']},
+            'options': {'filterfolder': folders['filter']},
+        }
+        readlater = data.get('readlater')
+        if readlater:
+            updates['IMAP-Artikelpostfach'] = {'imapHost': readlater['imap_host'], 'imapUser': readlater['user'],
+                                               'imapPasscode': readlater['password']}
+            updates['SMTP-Artikelpostfach'] = {'port': readlater['smtp_port'], 'smtp_server': readlater['smtp_host'],
+                                               'sender_email': readlater['user'], 'receiver_email': smtp['receiver'],
+                                               'password': readlater['password']}
+        updates = {section: {key: ini_value(value) for key, value in values.items()} for section, values in updates.items()}
+    except (KeyError, TypeError) as e:
+        return jsonify({'error': f'Missing value: {e}'}), 400
+
+    ensure_data_files()
+    try:
+        current = read_file(CONFIG_PATH)
+    except FileNotFoundError:
+        current = ''
+    write_file(CONFIG_PATH, set_ini_values(current, updates))
+
+    # The read-later and filter folders must exist, or the scripts fail on them
+    created, folder_error = [], None
+    try:
+        with MailBox(imap['host'], timeout=15).login(imap['user'], imap['password'], initial_folder=None) as mailbox:
+            created = create_missing_folders(mailbox, [folders['unread'], folders['filter']])
+    except Exception as e:
+        folder_error = str(e)
+    return jsonify({'created_folders': created, 'folder_error': folder_error})
 
 @app.route('/api/folders', methods=['GET'])
 def list_folders():

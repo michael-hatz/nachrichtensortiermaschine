@@ -9,7 +9,7 @@ from imap_tools import MailBox
 import os
 import sys
 import configparser
-from bs4 import BeautifulSoup
+from mailtext import html_to_text
 
 #global values
 script_directory = os.path.dirname(os.path.abspath(__file__))
@@ -71,9 +71,7 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
         # Try to process the HTML part
         if nachricht.html:
             try:
-                # Use BeautifulSoup to clean and extract text from HTML
-                soup = BeautifulSoup(nachricht.html, "html.parser")
-                emailinhalt = soup.get_text(separator="\n").strip()
+                emailinhalt = html_to_text(nachricht.html)
                 print(f"Extracted HTML content: {emailinhalt}")  # Debug: Log HTML content
             except Exception as e:
                 print(f"Error processing HTML content: {e}")

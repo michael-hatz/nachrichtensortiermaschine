@@ -56,8 +56,9 @@ receiver_email = mail_dict['SMTP']['receiver_email']
 password = mail_dict['SMTP']['password']
 
 FIRST_RUN_ITEMS = 10    # a newly subscribed feed only mails its newest entries
-REQUEST_TIMEOUT = 60    # seconds for feed downloads and SMTP connections
+REQUEST_TIMEOUT = 60    # seconds for feed/article downloads and SMTP connections
 FEED_TIMEOUT = 600      # max. seconds per feed, so a hanging feed can't block the others
+ERROR_MAIL_INTERVAL = 24  # hours; a feed that keeps failing is reported at most this often
 
 
 class FeedTimeout(Exception):
@@ -280,8 +281,8 @@ def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     if is_http_url(artikel_url):
         url_html = f'<a href="{url_html}">{url_html}</a>'
     html = (
-        f"====================<br>\nTitel: {titel_html}<br>\nURL: {url_html}<br>\n"
-        f"Länge: {laengetext} Wörter<br>\n====================<br>\n{artikel_content}"
+        f"<p>====================<br>Titel: {titel_html}<br>URL: {url_html}<br>"
+        f"Länge: {laengetext} Wörter<br>====================</p>\n{artikel_content}"
     )
     text = (
         f"====================\nTitel: {artikel_titel}\nURL: {artikel_url}\n"
@@ -349,6 +350,10 @@ def open_seen_db():
         url TEXT PRIMARY KEY,
         feed TEXT,
         seen_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS feed_errors (
+        feed TEXT PRIMARY KEY,
+        failing_since TEXT,
+        last_mailed TEXT)""")
     if os.path.exists(legacy_tsv_path):
         with open(legacy_tsv_path, newline="", encoding="utf-8") as file:
             urls = [row['URL'] for row in csv.DictReader(file, delimiter='\t') if row.get('URL')]
@@ -441,10 +446,23 @@ def find_page_redirect(html):
             return m.group(1)
     return None
 
+def download_page(url):
+    """Return (html bytes, final url) of a page, or (None, url) if it can't be fetched.
+    Uses a browser User-Agent, since some sites (e.g. spektrum.de) block trafilatura's default one."""
+    try:
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as e:
+        print(f"Download failed for {url}: {e}")
+        return None, url
+    if not response.ok:
+        print(f"Download failed for {url}: HTTP {response.status_code}")
+        return None, response.url
+    return response.content, response.url
+
 def fetch_article(url):
     """Download an article, following redirect notice pages (e.g. follow.it tracking links).
     Returns (html, final_url)."""
-    html = trafilatura.fetch_url(url)
+    html, url = download_page(url)
     for _ in range(MAX_REDIRECT_PAGES):
         target = find_page_redirect(html) if html else None
         if not target:
@@ -452,8 +470,7 @@ def fetch_article(url):
         target = requests.compat.urljoin(url, target)
         if not is_http_url(target):
             break
-        url = target
-        html = trafilatura.fetch_url(url)
+        html, url = download_page(target)
     return html, url
 
 def full_text2(url, mailbox, db):
@@ -523,15 +540,43 @@ def process_feed(section_dict, db):
     mailchecker(section_dict['imap-mailbox'])
     return failed
 
-def format_feed_errors(section, section_dict, errors):
+def feed_error_due(db, section, feed_failed):
+    """Remember whether the feed itself failed in this run and return whether its error should
+    be mailed: on the first failure, then at most every ERROR_MAIL_INTERVAL hours while it keeps
+    failing. Returns (due, failing_since)."""
+    row = db.execute("SELECT failing_since, last_mailed FROM feed_errors WHERE feed = ?", (section,)).fetchone()
+    with db:
+        if not feed_failed:
+            if row and row[0]:
+                print(f"Feed {section} works again")
+                db.execute("UPDATE feed_errors SET failing_since = NULL WHERE feed = ?", (section,))
+            return False, None
+        if not row:
+            db.execute("INSERT INTO feed_errors (feed) VALUES (?)", (section,))
+        db.execute("UPDATE feed_errors SET failing_since = COALESCE(failing_since, datetime('now', 'localtime')) "
+                   "WHERE feed = ?", (section,))
+    failing_since, last_mailed = db.execute(
+        "SELECT failing_since, last_mailed FROM feed_errors WHERE feed = ?", (section,)).fetchone()
+    due = last_mailed is None or db.execute(
+        "SELECT ? <= datetime('now', 'localtime', ?)", (last_mailed, f"-{ERROR_MAIL_INTERVAL} hours")).fetchone()[0]
+    return bool(due), failing_since
+
+def mark_feed_error_mailed(db, sections):
+    with db:
+        db.executemany("UPDATE feed_errors SET last_mailed = datetime('now', 'localtime') WHERE feed = ?",
+                       [(section,) for section in sections])
+
+def format_feed_errors(section, section_dict, errors, failing_since=None):
     lines = [
         "====================",
         f"Feed: {section}",
         f"URL: {section_dict.get('url', 'N/A')}",
         f"Mailbox: {section_dict.get('imap-mailbox', 'N/A')}",
         f"Volltext: {section_dict.get('fulltext', 'N/A')}",
-        "====================",
     ]
+    if failing_since:
+        lines.append(f"Feed fehlerhaft seit: {failing_since} (wird höchstens alle {ERROR_MAIL_INTERVAL} Stunden gemeldet)")
+    lines.append("====================")
     for link, error in errors:
         lines.append(f"\nArtikel: {link}" if link else "\nFehler beim Feed:")
         lines.append(error)
@@ -551,15 +596,26 @@ def main():
             errors = [(None, traceback.format_exc())]
         finally:
             signal.alarm(0)
-        if errors:
-            failed_feeds.append((section, format_feed_errors(section, section_dict, errors)))
+        # Errors of single articles are reported once (the article is marked as seen);
+        # errors of the feed itself would repeat every run, so they are throttled
+        article_errors = [(link, error) for link, error in errors if link]
+        feed_errors = [(link, error) for link, error in errors if not link]
+        due, failing_since = feed_error_due(db, section, bool(feed_errors))
+        if not due:
+            if feed_errors:
+                print(f"Feed {section} still failing since {failing_since}, already reported")
+            feed_errors = []
+        if article_errors or feed_errors:
+            report = format_feed_errors(section, section_dict, feed_errors + article_errors, failing_since)
+            failed_feeds.append((section, report, bool(feed_errors)))
 
     if failed_feeds:
-        names = ", ".join(section for section, _ in failed_feeds)
+        names = ", ".join(section for section, _, _ in failed_feeds)
         subject = f"Fehler bei Skriptausführung: {len(failed_feeds)} Feed(s) - {names}"
-        body = "\n\n".join(report for _, report in failed_feeds)
+        body = "\n\n".join(report for _, report, _ in failed_feeds)
         try:
             errormailer(body, subject)
+            mark_feed_error_mailed(db, [section for section, _, feed_failed in failed_feeds if feed_failed])
         except Exception as e:
             print(f"Error mail could not be sent: {e}\n{body}")
     print("Fertig")
