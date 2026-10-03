@@ -1,5 +1,6 @@
 # Local test setup: builds the image and uses ./testdata (gitignored) as /app/data.
 # Start:   docker compose -f docker-compose.test.yml up -d --build
+# Login:   user admin, password in testdata/web-password.txt (or set NSM_WEB_PASSWORD)
 # Run job: docker compose -f docker-compose.test.yml exec nsm python3 /app/nsm.py
 services:
   nsm:
@@ -11,3 +12,7 @@ services:
       - "5050:5000"
     volumes:
       - ./testdata:/app/data
+    # Login for the web interface (user "admin"); without it a random password is
+    # generated and stored in testdata/web-password.txt
+    # environment:
+    #   - NSM_WEB_PASSWORD=change-me

@@ -11,3 +11,5 @@ openai
 pillow
 flask
 
+gunicorn
+defusedxml

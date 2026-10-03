@@ -20,6 +20,9 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.firefox.options import Options
 import time
 import sys
+import argparse
+import fcntl
+import readlater
 
 script_directory = os.path.dirname(os.path.abspath(__file__))
 geckodriver_path = "/usr/local/bin/geckodriver"  # specify the path to your geckodriver
@@ -74,7 +77,7 @@ def start_driver():
 #OpenAI API-Key
 ai.api_key = mail_dict['options']['openai-key']
 
-def getarticleandsendmail(artikel): 
+def getarticleandsendmail(artikel, fallback_title=None):
     
 #trifalatura
     driver.vars = {}
@@ -91,7 +94,9 @@ def getarticleandsendmail(artikel):
     #soup = BeautifulSoup(url, 'html.parser')
     #titeldesdokuments = soup.title.string
     #print("zeile 92")
-    titeldesdokuments = driver.title
+    titeldesdokuments = driver.title or fallback_title or artikel
+    if h is None:
+        raise ValueError(f"Kein Artikeltext gefunden auf {artikel}")
     #print("zeile 94")
     ## 20.12.22: Hier hackt es gerade leicht, da Trafilatura eben einen extrahierten text liefert
     
@@ -137,12 +142,55 @@ def getarticleandsendmail(artikel):
         server.sendmail(sender_email, receiver_email, message.as_string())
     print("Mail gesendet")
     
-#durchsuche Mail
-start = time.monotonic()
-try:
+LOCK_PATH = "/app/data/pocket-ersatz.lock"
+
+
+def fetch_and_send(url, title=None):
+    """Load the article in Firefox and mail it. Firefox is started on first use and
+    restarted after an error, since it may hang or have crashed."""
+    global driver
+    if driver is None:
+        driver = start_driver()
+    try:
+        getarticleandsendmail(url, title)
+    except Exception:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        driver = None
+        raise
+
+
+def time_left(start):
+    return time.monotonic() - start < MAX_RUNTIME
+
+
+def process_queue(start):
+    """Links saved via the web interface / bookmarklet. A failed link stays in the queue
+    and is retried on the next runs, up to readlater.MAX_ATTEMPTS times."""
+    db = readlater.open_db()
+    tried = set()
+    while time_left(start):
+        item = readlater.next_pending(db, tried)
+        if item is None:
+            break
+        item_id, url, title = item
+        tried.add(item_id)
+        try:
+            fetch_and_send(url, title)
+            readlater.mark_done(db, item_id)
+        except Exception as e:
+            print("Fehler bei " + url + ": " + str(e))
+            readlater.mark_failed(db, item_id, e)
+    db.close()
+
+
+def process_mailbox(start):
+    """Links mailed to the Artikelpostfach."""
     with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
         for nachricht in mailbox.fetch(bulk=True):
-            if time.monotonic() - start > MAX_RUNTIME:
+            if not time_left(start):
                 print("Zeitlimit erreicht, restliche Mails beim nächsten Lauf")
                 break
             emailinhalt = nachricht.text or nachricht.html
@@ -153,24 +201,33 @@ try:
             regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
             matches = re.findall(regex, emailinhalt)
             print(matches)
-            #aktiviere pro Mail die Volltextmailingfunktion 
+            #aktiviere pro Mail die Volltextmailingfunktion
             for m in matches:
                 m = m.strip('<>')
-                # Firefox erst starten, wenn es wirklich etwas zu laden gibt
-                if driver is None:
-                    driver = start_driver()
                 try:
-                    getarticleandsendmail(m)
+                    fetch_and_send(m)
                 except Exception as e:
                     print("Fehler bei " + m + ": " + str(e))
-                    # Firefox könnte hängen oder abgestürzt sein: für den nächsten Artikel neu starten
-                    try:
-                        driver.quit()
-                    except Exception:
-                        pass
-                    driver = None
             print("m erledigt")
-finally:
-    # Firefox + geckodriver immer beenden, auch bei Fehlern oder sys.exit()
-    if driver is not None:
-        driver.quit()
+
+
+parser = argparse.ArgumentParser(description="Fetch read-later articles with Firefox and mail them.")
+parser.add_argument("--queue-only", action="store_true",
+                    help="only process the links saved via the web interface, not the Artikelpostfach")
+args = parser.parse_args()
+
+# Only one run at a time (cron and the web interface may start one); a second one waits
+with open(LOCK_PATH, "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    # Max. Laufzeit zählt ab hier, nicht ab dem Warten auf den Lock
+    start = time.monotonic()
+    try:
+        process_queue(start)
+        if not args.queue_only:
+            process_mailbox(start)
+            # links saved while the mailbox was processed
+            process_queue(start)
+    finally:
+        # Firefox + geckodriver immer beenden, auch bei Fehlern oder sys.exit()
+        if driver is not None:
+            driver.quit()

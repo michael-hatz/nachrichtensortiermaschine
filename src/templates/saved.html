@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>{{ 'Saved' if ok else 'Not saved' }} · Nachrichtensortiermaschine</title>
+    <style>
+        :root { --bg: #f3f5f8; --surface: #ffffff; --text: #1d2430; --muted: #6a7482; --ok: #1d7a46; --error: #b42318; --border: #dfe3ea; }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #14181e; --surface: #1b2028; --text: #e6e9ee; --muted: #939cab; --ok: #4cc488; --error: #f0806f; --border: #2c333e; }
+        }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text);
+               font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+        main { margin: 16px; padding: 20px 22px; max-width: 380px; width: calc(100% - 32px); box-sizing: border-box;
+               background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+        h1 { margin: 0 0 6px; font-size: 18px; color: {{ 'var(--ok)' if ok else 'var(--error)' }}; }
+        p { margin: 0; }
+        .link { margin-top: 10px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>{{ '✓ Saved for later' if ok else 'Not saved' }}</h1>
+        <p>{{ message }}</p>
+        {% if title or url %}<p class="link">{{ title or url }}</p>{% endif %}
+    </main>
+    {% if ok %}
+    <script>
+        // The bookmarklet opens this page as a popup: close it again after a moment.
+        // If popups are blocked it opened in the same tab: go back to the article instead.
+        setTimeout(() => {
+            if (window.opener) window.close();
+            else if (history.length > 1) history.back();
+        }, 1500);
+    </script>
+    {% endif %}
+</body>
+</html>

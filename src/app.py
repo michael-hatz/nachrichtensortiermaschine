@@ -1,18 +1,25 @@
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, send_file, jsonify, Response
 import os
 import subprocess
 import configparser
+import hashlib
+import hmac
 import io
 import re
+import secrets
 import shutil
 import smtplib
 import socket
 import tempfile
+import threading
+from urllib.parse import urlparse
 from datetime import date
 from xml.etree.ElementTree import Element, SubElement, tostring, ElementTree
-from werkzeug.utils import secure_filename
+import defusedxml.ElementTree as SafeET
+from defusedxml import DefusedXmlException
 from imap_tools import MailBox
 from imap_tools.errors import MailboxLoginError
+import readlater
 
 app = Flask(__name__)
 UPLOAD_FOLDER = '/app/data/'
@@ -20,6 +27,152 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 DEFAULTS_FOLDER = '/app/defaults/'  # pristine copies of the data files, see dockerfile
 CONFIG_PATH = '/app/data/config.cfg'
 DATA_FILES = ['config.cfg', 'feeds.cfg', 'filter.txt', 'killfile.txt']
+PASSWORD_FILE = '/app/data/web-password.txt'
+CRONTAB_PATH = '/etc/cron.d/myjobs'
+
+# ---------- Login and CSRF protection ----------
+
+def load_web_password():
+    """Password for the web interface: NSM_WEB_PASSWORD, or a random one that is generated on
+    the first start, stored in the data volume and printed to the container log."""
+    password = os.environ.get('NSM_WEB_PASSWORD', '').strip()
+    if password:
+        return password
+    try:
+        with open(PASSWORD_FILE, 'r', encoding='utf-8') as f:
+            password = f.read().strip()
+    except FileNotFoundError:
+        pass
+    if not password:
+        password = secrets.token_urlsafe(18)
+        fd = os.open(PASSWORD_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(password + '\n')
+    print(f"Web interface login: user '{WEB_USER}', password in {PASSWORD_FILE}: {password}", flush=True)
+    return password
+
+WEB_USER = os.environ.get('NSM_WEB_USER', 'admin').strip() or 'admin'
+WEB_PASSWORD = load_web_password()
+# Derived from the password, so it is the same in every worker and survives restarts
+CSRF_TOKEN = hmac.new(WEB_PASSWORD.encode(), b'nsm-csrf', hashlib.sha256).hexdigest()
+# Secret of the read-later bookmarklet; it only allows saving links, so it may sit in a bookmark
+READLATER_TOKEN = hmac.new(WEB_PASSWORD.encode(), b'nsm-readlater', hashlib.sha256).hexdigest()[:32]
+
+@app.before_request
+def require_login():
+    if request.path == '/save':
+        return  # the bookmarklet authenticates with READLATER_TOKEN instead
+    auth = request.authorization
+    if not (auth and auth.type == 'basic'
+            and hmac.compare_digest((auth.username or '').encode(), WEB_USER.encode())
+            and hmac.compare_digest((auth.password or '').encode(), WEB_PASSWORD.encode())):
+        return Response('Login required', 401, {'WWW-Authenticate': 'Basic realm="Nachrichtensortiermaschine", charset="UTF-8"'})
+    # Browsers send Basic Auth credentials along with requests from other sites too,
+    # so every state-changing request must carry the token from the page
+    if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        if not hmac.compare_digest(request.headers.get('X-CSRF-Token', ''), CSRF_TOKEN):
+            return 'Invalid or missing CSRF token. Please reload the page.', 403
+
+@app.context_processor
+def inject_csrf_token():
+    return {'csrf_token': CSRF_TOKEN}
+
+# ---------- Read later ----------
+
+MAX_URL_LENGTH = 2000
+_worker_lock = threading.Lock()
+_worker_state = {'running': False, 'again': False}
+
+def start_readlater_worker():
+    """Process the read-later queue in the background right away instead of waiting for the
+    cronjob. While a run is going on, another one is started after it, so a link saved in the
+    meantime isn't left until the next cron run."""
+    with _worker_lock:
+        if _worker_state['running']:
+            _worker_state['again'] = True
+            return
+        _worker_state['running'] = True
+    threading.Thread(target=_readlater_worker, daemon=True).start()
+
+def _readlater_worker():
+    while True:
+        try:
+            subprocess.run(['python3', '/app/pocket-ersatz.py', '--queue-only'])
+        except Exception as e:
+            print(f"Read-later run failed: {e}", flush=True)
+        with _worker_lock:
+            if not _worker_state['again']:
+                _worker_state['running'] = False
+                return
+            _worker_state['again'] = False
+
+def queue_link(url, title=None):
+    """Validate and queue a link; returns (ok, message)."""
+    url = (url or '').strip()
+    if urlparse(url).scheme.lower() not in ('http', 'https') or not urlparse(url).netloc:
+        return False, 'Only http(s) links can be saved.'
+    if len(url) > MAX_URL_LENGTH:
+        return False, 'The link is too long.'
+    title = re.sub(r'\s+', ' ', title or '').strip()[:300] or None
+    db = readlater.open_db()
+    try:
+        added = readlater.add(db, url, title)
+    finally:
+        db.close()
+    start_readlater_worker()
+    return True, 'Saved, the article will be mailed shortly.' if added else 'Already in the queue.'
+
+def bookmarklet():
+    """javascript: link that saves the current page; opens /save in a small popup
+    (or in the same tab if popups are blocked)."""
+    target = f"{request.host_url}save?token={READLATER_TOKEN}"
+    return ("javascript:(function(){var u='" + target + "&url='+encodeURIComponent(location.href)"
+            "+'&title='+encodeURIComponent(document.title);"
+            "if(!window.open(u,'nsm-save','width=440,height=260'))location.href=u;})();")
+
+@app.route('/save', methods=['GET'])
+def save_readlater():
+    """Target of the bookmarklet: /save?token=...&url=...&title=..."""
+    if not hmac.compare_digest(request.args.get('token', ''), READLATER_TOKEN):
+        ok, message = False, 'Invalid token. Please drag the bookmarklet from the web interface into your bookmarks again.'
+        status = 403
+    else:
+        ok, message = queue_link(request.args.get('url'), request.args.get('title'))
+        status = 200 if ok else 400
+    return render_template('saved.html', ok=ok, message=message, url=request.args.get('url', ''),
+                           title=request.args.get('title', '')), status
+
+@app.route('/api/readlater', methods=['GET'])
+def readlater_list():
+    db = readlater.open_db()
+    try:
+        return jsonify(readlater.recent(db))
+    finally:
+        db.close()
+
+@app.route('/api/readlater', methods=['POST'])
+def readlater_add():
+    data = request.get_json(force=True, silent=True) or {}
+    ok, message = queue_link(data.get('url'), data.get('title'))
+    return jsonify({'ok': ok, 'message': message}), 200 if ok else 400
+
+# ---------- Crontab validation ----------
+
+CRON_SCRIPTS = r'(?:nsm|pocket-ersatz|archive-sort|pocket-mailer|pocket-mailer-epub)\.py'
+CRON_LINE = re.compile(
+    r'^(?:[0-9*/,-]+\s+){5}root\s+'
+    r'(?:'
+    r'(?:/opt/venv/bin/)?python3\s+/app/' + CRON_SCRIPTS + r'(?:\s+--[a-z-]+(?:=[\w./-]+)?)*(?:\s+>>\s*/app/[\w.-]+\.log\s+2>&1)?'
+    r'|rm -r /tmp/\*'
+    r'|pkill -f (?:/usr/local/bin/geckodriver|/opt/firefox/)'
+    r')\s*;?\s*$'
+)
+
+def invalid_crontab_lines(content):
+    """Return the lines that are not a schedule for one of the app's scripts or maintenance jobs.
+    The jobs run as root, so a free-form crontab would allow running any command."""
+    return [line for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith('#') and not CRON_LINE.match(line.strip())]
 
 def ensure_data_files():
     """Copy the default data files into /app/data if they are missing (e.g. an empty volume
@@ -49,7 +202,7 @@ def index():
     # Read the crontab
     try:
         # Read the cron job file directly
-        with open('/etc/cron.d/myjobs', 'r') as f:
+        with open(CRONTAB_PATH, 'r') as f:
             crontab_content = f.read()
     except FileNotFoundError:
         # Handle the case where the cron job file does not exist
@@ -62,6 +215,7 @@ def index():
         filter=filter_content,
         killfile=killfile_content,  # Pass killfile content to the template
         crontab=crontab_content,  # Pass crontab content to the template
+        bookmarklet=bookmarklet(),
         needs_setup=needs_setup()
     )
 
@@ -80,6 +234,18 @@ def save():
     # Helper to normalize line endings for comparison
     def normalize(content):
         return content.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Check the crontab before saving anything, so a rejected save changes nothing
+    try:
+        with open(CRONTAB_PATH, 'r') as f:
+            crontab_changed = normalize(f.read()) != crontab_content
+    except FileNotFoundError:
+        crontab_changed = bool(crontab_content)
+    bad_lines = invalid_crontab_lines(crontab_content) if crontab_changed else []
+    if bad_lines:
+        return jsonify({'error': 'Crontab not saved, nothing was saved. Only schedules for the '
+                                 'scripts in /app are allowed, e.g. "58 * * * * root /opt/venv/bin/python3 '
+                                 '/app/nsm.py". Rejected lines: ' + ' | '.join(bad_lines)}), 400
 
     # Save config.cfg if changed
     try:
@@ -117,14 +283,14 @@ def save():
 
     # Save crontab if changed
     try:
-        with open('/etc/cron.d/myjobs', 'r') as f:
+        with open(CRONTAB_PATH, 'r') as f:
             current_crontab = normalize(f.read())
     except FileNotFoundError:
         current_crontab = ""
     if current_crontab != crontab_content:
-        with open('/etc/cron.d/myjobs', 'w') as crontab_file:
+        with open(CRONTAB_PATH, 'w') as crontab_file:
             crontab_file.write(crontab_content)
-        os.chmod('/etc/cron.d/myjobs', 0o644)  # Ensure correct permissions
+        os.chmod(CRONTAB_PATH, 0o644)  # Ensure correct permissions
 
     return jsonify({'created_folders': created_folders, 'folder_error': folder_error})
 
@@ -400,87 +566,76 @@ def import_opml():
         print("No selected file.")  # Debug: Log empty filename
         return "No selected file", 400
 
-    if file:
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
+    # Parse in memory: the upload must never be written to /app/data, where a file called
+    # e.g. config.cfg would replace the configuration. defusedxml blocks entity attacks.
+    try:
+        root = SafeET.fromstring(file.read())
+    except (SafeET.ParseError, DefusedXmlException) as e:
+        print(f"Error parsing OPML file: {e}")
+        return "Invalid OPML file", 400
 
-        # Debug: Log the uploaded file path
-        print(f"Uploaded OPML file saved to: {file_path}")
+    # Update feeds.cfg
+    config = configparser.ConfigParser()
+    feeds_path = '/app/data/feeds.cfg'
+    config.read(feeds_path)
 
-        # Parse OPML file
-        import xml.etree.ElementTree as ET
-        try:
-            tree = ET.parse(file_path)
-            root = tree.getroot()
-        except ET.ParseError as e:
-            print(f"Error parsing OPML file: {e}")
-            return "Invalid OPML file", 400
+    added_feeds = []
+    updated_feeds = []
+    skipped_feeds = []
 
-        # Debug: Log the parsed OPML structure
-        print("Parsed OPML structure:")
-        for outline in root.findall(".//outline"):
-            print(outline.attrib)
+    for outline in root.findall(".//outline"):
+        if not outline.get('xmlUrl', '').strip():
+            continue  # a category folder, not a feed
+        # One line, no brackets: anything else could break or inject sections into feeds.cfg
+        section = re.sub(r'[\[\]\r\n]+', ' ', outline.get('title') or outline.get('text') or 'Unnamed Feed').strip() or 'Unnamed Feed'
+        new_feed = {key: re.sub(r'[\r\n]+', '', value).strip() for key, value in {
+            'url': outline.get('xmlUrl', ''),
+            'fulltext': outline.get('fulltext', 'False'),
+            'active': outline.get('active', 'True'),
+            'imap-mailbox': outline.get('imap-mailbox', 'INBOX')
+        }.items()}
 
-        # Update feeds.cfg
-        config = configparser.ConfigParser()
-        feeds_path = '/app/data/feeds.cfg'
-        config.read(feeds_path)
-
-        added_feeds = []
-        updated_feeds = []
-        skipped_feeds = []
-
-        for outline in root.findall(".//outline"):
-            section = outline.get('title', outline.get('text', 'Unnamed Feed'))
-            new_feed = {
-                'url': outline.get('xmlUrl', ''),
-                'fulltext': outline.get('fulltext', 'False'),
-                'active': outline.get('active', 'True'),
-                'imap-mailbox': outline.get('imap-mailbox', 'INBOX')
-            }
-
-            if section in config:
-                # Check if the feed is identical
-                existing_feed = dict(config[section])
-                if existing_feed == new_feed:
-                    skipped_feeds.append(section)
-                else:
-                    config[section] = new_feed
-                    updated_feeds.append(section)
+        if section in config:
+            # Check if the feed is identical
+            existing_feed = dict(config[section])
+            if existing_feed == new_feed:
+                skipped_feeds.append(section)
             else:
                 config[section] = new_feed
-                added_feeds.append(section)
+                updated_feeds.append(section)
+        else:
+            config[section] = new_feed
+            added_feeds.append(section)
 
-        # Debug: Log the updated feeds.cfg content
-        print("Updated feeds.cfg content:")
-        for section in config.sections():
-            print(f"[{section}]")
-            for key, value in config[section].items():
-                print(f"{key} = {value}")
+    # Debug: Log the updated feeds.cfg content
+    print("Updated feeds.cfg content:")
+    for section in config.sections():
+        print(f"[{section}]")
+        for key, value in config[section].items():
+            print(f"{key} = {value}")
 
-        # Save updated feeds.cfg
-        try:
-            with open(feeds_path, 'w', encoding='utf-8') as configfile:
-                config.write(configfile)
-            print(f"feeds.cfg successfully updated at {feeds_path}")
-        except Exception as e:
-            print(f"Error writing to feeds.cfg: {e}")
-            return "Error updating feeds.cfg", 500
+    # Save updated feeds.cfg
+    try:
+        with open(feeds_path, 'w', encoding='utf-8') as configfile:
+            config.write(configfile)
+        print(f"feeds.cfg successfully updated at {feeds_path}")
+    except Exception as e:
+        print(f"Error writing to feeds.cfg: {e}")
+        return "Error updating feeds.cfg", 500
 
-        created_folders, folder_error = create_missing_feed_folders()
-        folder_note = ""
-        if created_folders:
-            folder_note = f" Created mail folders: {', '.join(created_folders)}"
-        elif folder_error:
-            folder_note = f" Could not check mail folders: {folder_error}"
+    created_folders, folder_error = create_missing_feed_folders()
+    folder_note = ""
+    if created_folders:
+        folder_note = f" Created mail folders: {', '.join(created_folders)}"
+    elif folder_error:
+        folder_note = f" Could not check mail folders: {folder_error}"
 
-        # Provide feedback to the user
-        return (
-            f"OPML imported successfully! "
-            f"Added: {len(added_feeds)}, Updated: {len(updated_feeds)}, Skipped: {len(skipped_feeds)}"
-            f"{folder_note}"
-        )
+    # Provide feedback to the user
+    return (
+        f"OPML imported successfully! "
+        f"Added: {len(added_feeds)}, Updated: {len(updated_feeds)}, Skipped: {len(skipped_feeds)}"
+        f"{folder_note}"
+    )
 
 def read_file(file_path):
     """Read the content of a file."""
@@ -494,4 +649,4 @@ def write_file(file_path, content):
         file.write(content)
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000)  # production: gunicorn, see dockerfile

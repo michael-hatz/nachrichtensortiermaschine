@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>Nachrichtensortiermaschine</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f5fbf'/%3E%3Cpath d='M8 11h16M8 16h16M8 21h10' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
     <style>
@@ -187,6 +188,7 @@
             width: 100%; padding: 7px 10px; font-size: 14px;
         }
         .gui .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 75ch; }
+        .tab-content > .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 75ch; }
         .gui .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
         .gui .toolbar input[type="search"], .gui .toolbar input[type="text"] { flex: 1; min-width: 180px; width: auto; }
         .gui .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -281,6 +283,13 @@
         .action-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
         .action-item > div:first-child { flex: 1 1 150px; min-width: 0; }
         .action-item span { font-size: 13.5px; color: var(--muted); }
+        .readlater-add input { flex: 1 1 180px; min-width: 0; }
+        .readlater-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+        .readlater-list:empty { display: none; }
+        .readlater-list li { display: flex; gap: 10px; align-items: baseline; padding: 4px 2px; }
+        .readlater-list a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+        .readlater-list .state { flex: none; color: var(--muted); font-size: 12.5px; }
+        .readlater-list .state.failed { color: var(--danger); }
         .action-item strong { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
         .file-pick { position: relative; overflow: hidden; }
         .file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -474,6 +483,7 @@
             <div class="tab-header">
                 <h2>Crontab <span class="filename">/etc/cron.d/myjobs</span></h2>
             </div>
+            <p class="hint">Jobs run as root, so only schedules for the scripts in <code>/app</code> are accepted, e.g. <code>58 * * * * root /opt/venv/bin/python3 /app/nsm.py</code>.</p>
             <textarea name="crontab" spellcheck="false">{{ crontab }}</textarea>
         </div>
         <div id="actions" class="tab-content">
@@ -498,6 +508,21 @@
                             <button type="button" onclick="runScript('send-epub', this)">Send</button>
                         </div>
                     </div>
+                </section>
+                <section class="action-card">
+                    <h3>Read later</h3>
+                    <p>Save a page without writing a mail. Firefox fetches the full text and mails it to you.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Bookmarklet</strong><span>Drag the button to your bookmarks toolbar, then click it on any article</span></div>
+                            <a class="btn secondary" href="{{ bookmarklet }}" title="Drag me to the bookmarks toolbar" onclick="event.preventDefault(); toast('Drag this button to your bookmarks toolbar.')">Read later</a>
+                        </div>
+                        <div class="action-item readlater-add">
+                            <input type="url" id="readlater-url" placeholder="https://… paste a link" aria-label="Link to save">
+                            <button type="button" id="readlater-save" onclick="saveReadLater(this)">Save</button>
+                        </div>
+                    </div>
+                    <ul class="readlater-list" id="readlater-list" aria-live="polite"></ul>
                 </section>
                 <section class="action-card">
                     <h3>Download</h3>
@@ -547,6 +572,12 @@
             <div class="prose">
     <h3>Configuration</h3>
     <p>Please configure your mail settings in the Settings tab.</p>
+
+    <h3>Read later without mail</h3>
+    <p>In the Actions tab, drag the <strong>Read later</strong> button to your bookmarks toolbar. Clicking it on an article saves the page: a small popup confirms it and closes again. Firefox then fetches the full text right away and mails it like a link sent to the Artikelpostfach. The bookmarklet contains its own key, so it works without logging in. It only allows saving links. If you change the web password, drag the button to your toolbar again. A link that fails is retried on the next runs, up to three times; the list in the Actions tab shows its state.</p>
+
+    <h3>Login</h3>
+    <p>The web interface asks for a login (user <code>admin</code>). Set the password with the environment variable <code>NSM_WEB_PASSWORD</code> (and optionally the user with <code>NSM_WEB_USER</code>). Without it, a random password is generated on the first start, stored in <code>web-password.txt</code> in the data volume and printed to the container log. The login is sent unencrypted over plain HTTP, so put a reverse proxy with HTTPS in front if the interface is reachable from outside your network.</p>
 
     <div class="note">
         <strong>Recommendation:</strong> I recommend using a separate mail account for this program. If you're trying to integrate news, order confirmations, private communication, and so on into one INBOX, it will end in chaos.
@@ -733,6 +764,19 @@ Currently not functional</pre>
     </dialog>
 
     <script>
+        // ---------- CSRF ----------
+        // Every request that changes something must carry the token, or the server rejects it
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (resource, options = {}) => {
+            const method = (options.method || 'GET').toUpperCase();
+            if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                options = { ...options, headers: new Headers(options.headers || {}) };
+                options.headers.set('X-CSRF-Token', CSRF_TOKEN);
+            }
+            return nativeFetch(resource, options);
+        };
+
         // ---------- Tabs ----------
         const TABS = [...document.querySelectorAll('.tab')].map(tab => tab.dataset.tab);
         function showTab(tabName) {
@@ -807,6 +851,50 @@ Currently not functional</pre>
             .catch(error => toast(error.message, 'error'))
             .finally(() => setBusy(button, false));
         }
+
+        // ---------- Read later ----------
+        const STATE_LABELS = { queued: 'queued', retrying: 'retrying', sent: 'sent', failed: 'failed' };
+        let readLaterTimer = null;
+
+        function loadReadLater() {
+            fetch('/api/readlater')
+            .then(response => response.ok ? response.json() : [])
+            .then(items => {
+                const list = document.getElementById('readlater-list');
+                list.replaceChildren(...items.map(item => {
+                    const state = el('span', { class: 'state ' + item.state, title: item.error || item.added_at },
+                                     [STATE_LABELS[item.state] || item.state]);
+                    return el('li', {}, [el('a', { href: item.url, target: '_blank', rel: 'noopener', title: item.url },
+                                            [item.title || item.url]), state]);
+                }));
+                // refresh while articles are being fetched
+                clearTimeout(readLaterTimer);
+                if (items.some(item => item.state === 'queued' || item.state === 'retrying')) {
+                    readLaterTimer = setTimeout(loadReadLater, 10000);
+                }
+            })
+            .catch(() => {});
+        }
+        loadReadLater();
+
+        function saveReadLater(button) {
+            const input = document.getElementById('readlater-url');
+            if (!input.value.trim()) { input.focus(); return; }
+            setBusy(button, true);
+            fetch('/api/readlater', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: input.value.trim() }),
+            })
+            .then(response => response.json().then(result => {
+                toast(result.message, result.ok ? 'success' : 'error');
+                if (result.ok) input.value = '';
+                loadReadLater();
+            }))
+            .catch(error => toast('Error: ' + error, 'error'))
+            .finally(() => setBusy(button, false));
+        }
+        document.getElementById('readlater-url').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); saveReadLater(document.getElementById('readlater-save')); }
+        });
 
         const opmlFile = document.getElementById('opml-file');
         opmlFile.addEventListener('change', () => {
@@ -1499,7 +1587,13 @@ Currently not functional</pre>
                 body: formData
             })
             .then(response => {
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        let message = text;
+                        try { message = JSON.parse(text).error || text; } catch (e) {}
+                        throw new Error(message || `HTTP ${response.status}`);
+                    });
+                }
                 return response.json();
             })
             .then(result => {

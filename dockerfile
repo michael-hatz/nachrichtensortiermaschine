@@ -85,6 +85,7 @@ COPY src/pocket-ersatz.py ./
 COPY src/pocket-mailer.py ./
 COPY src/pocket-mailer-epub.py ./
 COPY src/archive-sort.py ./
+COPY src/readlater.py ./
 COPY src/app.py /app/
 COPY src/templates/ /app/templates/
 
@@ -125,8 +126,10 @@ COPY crontab.txt /etc/cron.d/myjobs
 RUN chmod 0644 /etc/cron.d/myjobs
 
 # Create startup script to run cron and Flask app
+# gunicorn instead of Flask's development server; one worker with threads, since the
+# actions run the scripts synchronously and can take minutes
 RUN echo '#!/bin/bash\n\
-python3 /app/app.py &\n\
+gunicorn --chdir /app --bind 0.0.0.0:5000 --workers 1 --threads 4 --access-logfile - app:app &\n\
 exec cron -f' > /start.sh && chmod +x /start.sh
 
 # tini als PID 1 räumt verwaiste Prozesse (z.B. Firefox-Kinder) ab
