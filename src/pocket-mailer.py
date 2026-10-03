@@ -1,36 +1,25 @@
 #!/usr/bin/env python3
 #-*- coding: utf-8 -*-
 
-import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from imap_tools import MailBox
 import os
 import sys
-import configparser
 from mailtext import html_to_text
+import common
 
-#global values
-script_directory = os.path.dirname(os.path.abspath(__file__))
+common.setup_logging("pocket-mailer")
 
 #E-Mail-Configuration
-config = configparser.ConfigParser()
-configpath = os.path.join(script_directory , "/app/data/config.cfg")
-config.read(configpath)
-mail_dict = dict(config)
-
-imapHost = mail_dict['IMAP']['imapHost']
-imapUser = mail_dict['IMAP']['imapUser']
-imapPasscode = mail_dict['IMAP']['imapPasscode']
-Eingangsordner = mail_dict['Mailings']['unread_folder']
-  
-#Konfiguration SMTP
-port = mail_dict['SMTP-Artikelpostfach']['port']
-smtp_server = mail_dict['SMTP-Artikelpostfach']['smtp_server']
-sender_email = mail_dict['SMTP-Artikelpostfach']['sender_email']
-receiver_email = mail_dict['SMTP-Artikelpostfach']['receiver_email']
-password = mail_dict['SMTP-Artikelpostfach']['password']
+config = common.load_config()
+imapHost = config['IMAP']['imapHost']
+imapUser = config['IMAP']['imapUser']
+imapPasscode = config['IMAP']['imapPasscode']
+Eingangsordner = config['Mailings']['unread_folder']
+smtp_config = config['SMTP-Artikelpostfach']
+receiver_email = smtp_config['receiver_email']
 
 ###############################
 
@@ -38,48 +27,40 @@ def sendeanhang(to, subject, body, filename):
     # Nachrichtenobjekt erstellen
     message = MIMEMultipart()
  
-    # Absender und Titel der Mail definieren
-    message['From'] = sender_email
-    message['To'] = receiver_email
+    # Titel der Mail definieren
     message['Subject'] = "Export"
  
     # Anhang dran
     file = "nachrichtensortiermaschine.txt"
-    attachment = open(file,'rb')
-    
-    obj = MIMEBase('application','octet-stream')
-    obj.set_payload((attachment).read())
+    with open(file, 'rb') as attachment:
+        obj = MIMEBase('application','octet-stream')
+        obj.set_payload(attachment.read())
     encoders.encode_base64(obj)
     obj.add_header('Content-Disposition',"attachment; filename= "+file)
     message.attach(obj)
-    my_message = message.as_string()
 
     #Mail Senden
-    email_session = smtplib.SMTP(smtp_server, port)
-    email_session.starttls()
-    email_session.login(sender_email,password)
-    email_session.sendmail(sender_email,receiver_email,my_message)
-    email_session.quit()
+    common.send_mail(smtp_config, message)
     print("YOUR MAIL HAS BEEN SENT SUCCESSFULLY")
     
 # Mailbody lesen und alles in einen riesigen String packen
 buchtext = ""
 with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
-    for nachricht in mailbox.fetch(bulk=True):
+    for nachricht in mailbox.fetch(mark_seen=False, bulk=True):
         emailinhalt = ""
 
         # Try to process the HTML part
         if nachricht.html:
             try:
                 emailinhalt = html_to_text(nachricht.html)
-                print(f"Extracted HTML content: {emailinhalt}")  # Debug: Log HTML content
+                print(f"HTML: {nachricht.subject} ({len(emailinhalt.split())} Wörter)")
             except Exception as e:
                 print(f"Error processing HTML content: {e}")
 
         # Fallback to plain text if HTML is empty or fails
         if not emailinhalt and nachricht.text:
             emailinhalt = nachricht.text.strip()
-            print(f"Fallback to plain text content: {emailinhalt}")  # Debug: Log plain text content
+            print(f"Text: {nachricht.subject} ({len(emailinhalt.split())} Wörter)")
 
         # Skip emails with no content
         if not emailinhalt:
@@ -88,7 +69,6 @@ with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
 
         # Append the processed content to the book text
         buchtext = emailinhalt.strip() + "\n\n" + buchtext.strip()
-        print(f"Current buchtext: {buchtext}")  # Debug: Log accumulated content
 
 #Datei schreiben und dann raussenden
 with open("nachrichtensortiermaschine.txt", "w", encoding="utf-8") as f:

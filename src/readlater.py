@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Queue of read-later links saved via the web interface or the bookmarklet.
-app.py adds the links, pocket-ersatz.py fetches the articles and mails them."""
+"""Queue of read-later links saved via the web interface, the bookmarklet or the Artikelpostfach.
+app.py and pocket-ersatz.py add the links, pocket-ersatz.py fetches the articles and mails them."""
 
-import sqlite3
+import common
 
-DB_PATH = "/app/data/nsm.db"
 MAX_ATTEMPTS = 3  # a link that fails this often is given up
 
 
 def open_db():
-    db = sqlite3.connect(DB_PATH, timeout=30)
+    db = common.connect_db()
     db.execute("""CREATE TABLE IF NOT EXISTS readlater_queue (
         id INTEGER PRIMARY KEY,
         url TEXT NOT NULL,

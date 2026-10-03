@@ -1,139 +1,102 @@
 FROM ubuntu:26.04
 
-# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 # Local timezone incl. DST (CET/CEST); cron schedules in local time
 ENV TZ=Europe/Berlin
 
-# Update and install necessary packages, including python3-pip
-RUN apt-get update && apt-get install -y \
+# Firefox and geckodriver are pinned together: a new Firefox may need a newer geckodriver.
+# To update, bump both versions and their checksums (Firefox: SHA256SUMS next to the release,
+# geckodriver: sha256sum of the downloaded tarball).
+ARG FIREFOX_VERSION=153.4.0esr
+ARG FIREFOX_SHA256=1832c20dd8c5f69cee933debe62372f5c997845413c8eff846317f6463172032
+ARG GECKODRIVER_VERSION=0.37.1
+ARG GECKODRIVER_SHA256=e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
+
+# System packages: Python, cron, tini, and the libraries Firefox needs
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    python3-pip \
     python3-venv \
     cron \
     curl \
-    nano \
-    build-essential \
-    libssl-dev \
-    libffi-dev \
-    python3-dev \
-    libxml2-dev \
-    libxslt1-dev \
-    zlib1g-dev \
+    ca-certificates \
+    xz-utils \
+    tini \
+    tzdata \
+    procps \
+    fonts-dejavu-core \
     libx11-6 \
+    libx11-xcb1 \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
+    libxt6t64 \
     libgtk-3-0t64 \
     libdbus-glib-1-2 \
     libgdk-pixbuf-2.0-0 \
-    libxt6t64 \
+    libasound2t64 \
     libnss3 \
     libnspr4 \
-    tar \
-    fonts-dejavu-core \
-    tini \
-    tzdata \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
-# Install necessary dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
-    tar \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libasound2t64 \
-    libgdk-pixbuf-2.0-0 \
-    curl \
-    ca-certificates
+# Firefox
+RUN curl -fsSL -o /tmp/firefox.tar.xz \
+        "https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.xz" \
+    && echo "${FIREFOX_SHA256}  /tmp/firefox.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/firefox.tar.xz -C /opt \
+    && ln -s /opt/firefox/firefox /usr/local/bin/firefox \
+    && rm /tmp/firefox.tar.xz
 
-# Install rsyslog for logging
-RUN apt-get update && apt-get install -y rsyslog
-RUN echo "cron.* /var/log/cron.log" >> /etc/rsyslog.d/50-default.conf
+# geckodriver
+RUN curl -fsSL -o /tmp/geckodriver.tar.gz \
+        "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
+    && echo "${GECKODRIVER_SHA256}  /tmp/geckodriver.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin \
+    && rm /tmp/geckodriver.tar.gz
 
-# Download the latest Firefox
-RUN wget -O /tmp/firefox.tar.xz "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US" && \
-    tar -xJf /tmp/firefox.tar.xz -C /opt && \
-    ln -s /opt/firefox/firefox /usr/local/bin/firefox && \
-    rm /tmp/firefox.tar.xz
+# Unprivileged user for the cronjobs and scripts (Firefox opens arbitrary web pages)
+RUN useradd --system --create-home --home-dir /home/nsm --shell /usr/sbin/nologin nsm
 
 # Ubuntu >= 23.04 blocks system-wide pip installs (PEP 668), so use a virtualenv.
 # It is first in PATH, so "python3"/"pip3" resolve to the venv from here on.
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip3 install --upgrade pip && \
-    pip3 install selenium
 
-# Copy your local geckodriver to the container
-COPY src/files/geckodriver-v0.35.0-linux64.tar.gz /tmp/
-
-# Extract the geckodriver and move it to /usr/local/bin
-RUN tar -xzvf /tmp/geckodriver-v0.35.0-linux64.tar.gz -C /tmp && \
-    mv /tmp/geckodriver /usr/local/bin/ && \
-    rm /tmp/geckodriver-v0.35.0-linux64.tar.gz
-
-# Set the working directory
 WORKDIR /app
 
-# Copy application code
+# Python dependencies before the code, so code changes don't reinstall them
 COPY src/requirements.txt ./
-COPY src/nsm.py ./
-COPY src/mailtext.py ./
-COPY src/pocket-ersatz.py ./
-COPY src/pocket-mailer.py ./
-COPY src/pocket-mailer-epub.py ./
-COPY src/archive-sort.py ./
-COPY src/readlater.py ./
-COPY src/app.py /app/
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Application code
+COPY src/common.py src/feeddb.py src/nsm.py src/mailtext.py src/pocket-ersatz.py src/pocket-mailer.py \
+     src/pocket-mailer-epub.py src/archive-sort.py src/readlater.py src/app.py ./
 COPY src/templates/ /app/templates/
 
-# Copy custom Firefox extensions into the container
-COPY src/files/istilldontcareaboutcookies-1.1.4.xpi ./
-COPY src/files/bypass-paywalls-firefox.xpi ./
+# Firefox extensions, loaded by pocket-ersatz.py via install_addon
+COPY src/files/istilldontcareaboutcookies-1.1.4.xpi src/files/bypass-paywalls-firefox.xpi ./
 
-# Copy custom Firefox extensions into the browser extensions directory
-RUN mkdir -p /usr/lib/firefox/browser/extensions/ \
-    && cp /app/istilldontcareaboutcookies-1.1.4.xpi /usr/lib/firefox/browser/extensions/ \
-    && cp /app/bypass-paywalls-firefox.xpi /usr/lib/firefox/browser/extensions/
-
-# Create persistent storage directory
-RUN mkdir -p /app/data && chmod 777 /app/data
-
-# Copy default config files into persistent storage
-COPY src/config.cfg /app/data/
-COPY src/feeds.cfg /app/data/
-COPY src/filter.txt /app/data/
-COPY src/killfile.txt /app/data/
-
+# Default data files; the volume gets them on first use
+COPY src/config.cfg src/feeds.cfg src/filter.txt src/killfile.txt /app/data/
+RUN chown -R nsm:nsm /app/data && chmod 2775 /app/data
 # Pristine copies; the web app restores them if the mounted volume lacks them
 COPY src/config.cfg src/feeds.cfg src/filter.txt src/killfile.txt /app/defaults/
-
-# Declare persistent volume
 VOLUME ["/app/data"]
 
-# Install Python dependencies (including Flask)
-RUN pip3 install --no-cache-dir -r requirements.txt \
-    && pip3 install Flask
-
-
-# Install cron
-RUN apt-get update && apt-get install -y cron
-
-# Copy your cron jobs to /etc/cron.d/
+# Cron jobs
 COPY crontab.txt /etc/cron.d/myjobs
 RUN chmod 0644 /etc/cron.d/myjobs
 
-# Create startup script to run cron and Flask app
-# gunicorn instead of Flask's development server; one worker with threads, since the
-# actions run the scripts synchronously and can take minutes
-RUN echo '#!/bin/bash\n\
-gunicorn --chdir /app --bind 0.0.0.0:5000 --workers 1 --threads 4 --access-logfile - app:app &\n\
-exec cron -f' > /start.sh && chmod +x /start.sh
+# Startup script: permissions of /app/data, gunicorn and cron
+COPY --chmod=755 start.sh /start.sh
+
+EXPOSE 5000
+
+# Healthy if the web interface answers (any HTTP status, it requires a login) and cron runs
+HEALTHCHECK --interval=1m --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -s -o /dev/null http://127.0.0.1:5000/ && pgrep -x cron > /dev/null || exit 1
 
 # tini als PID 1 räumt verwaiste Prozesse (z.B. Firefox-Kinder) ab
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/start.sh"]
-
-

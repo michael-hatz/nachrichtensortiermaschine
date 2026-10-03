@@ -1,16 +1,12 @@
-import configparser
-import os
 from collections import defaultdict
 from imap_tools import MailBox
+import common
 
 # Moves read articles from the archive folder back into their feed folder.
 # nsm.py stores the target folder of every article in the X-Special-Header.
 
-script_directory = os.path.dirname(os.path.abspath(__file__))
-
-config = configparser.ConfigParser()
-configpath = os.path.join(script_directory , "/app/data/config.cfg")
-config.read(configpath)
+common.setup_logging("archive-sort")
+config = common.load_config()
 
 imapHost = config['IMAP']['imapHost']
 imapUser = config['IMAP']['imapUser']

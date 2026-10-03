@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, send_file, jsonify, Response
 import os
 import subprocess
 import configparser
+import fcntl
 import hashlib
 import hmac
 import io
@@ -12,22 +13,27 @@ import smtplib
 import socket
 import tempfile
 import threading
-from urllib.parse import urlparse
-from datetime import date
+from urllib.parse import urlparse, urljoin
+from datetime import date, datetime
 from xml.etree.ElementTree import Element, SubElement, tostring, ElementTree
 import defusedxml.ElementTree as SafeET
 from defusedxml import DefusedXmlException
 from imap_tools import MailBox
 from imap_tools.errors import MailboxLoginError
 import readlater
+import common
+import feeddb
+import requests
+import feedparser
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
-UPLOAD_FOLDER = '/app/data/'
+UPLOAD_FOLDER = common.DATA_DIR
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 DEFAULTS_FOLDER = '/app/defaults/'  # pristine copies of the data files, see dockerfile
-CONFIG_PATH = '/app/data/config.cfg'
+CONFIG_PATH = common.CONFIG_PATH
 DATA_FILES = ['config.cfg', 'feeds.cfg', 'filter.txt', 'killfile.txt']
-PASSWORD_FILE = '/app/data/web-password.txt'
+PASSWORD_FILE = common.data_path('web-password.txt')
 CRONTAB_PATH = '/etc/cron.d/myjobs'
 
 # ---------- Login and CSRF protection ----------
@@ -77,6 +83,99 @@ def require_login():
 def inject_csrf_token():
     return {'csrf_token': CSRF_TOKEN}
 
+# ---------- Running the scripts ----------
+
+# The scripts run as the unprivileged user nsm, like the cronjobs (see dockerfile)
+SCRIPT_USER = common.SCRIPT_USER
+# Files the web app creates in /app/data (database, locks, config) get group nsm from the
+# setgid directory; group-writable so the scripts can write them too
+os.umask(0o002)
+
+def script_kwargs():
+    """subprocess arguments to run the app's scripts as SCRIPT_USER if the web app runs as root."""
+    env = {**os.environ, 'PYTHONUNBUFFERED': '1'}  # unbuffered for the live log
+    if os.geteuid() != 0:
+        return {'env': env}
+    return {'user': SCRIPT_USER, 'group': SCRIPT_USER, 'extra_groups': [],
+            'env': {**env, 'HOME': f'/home/{SCRIPT_USER}'}}
+
+def run_script(args, **kwargs):
+    """subprocess.run for the app's scripts, as SCRIPT_USER if the web app runs as root."""
+    return subprocess.run(args, **script_kwargs(), **kwargs)
+
+def script_workdir():
+    """Temporary working directory the scripts can write their files to."""
+    workdir = tempfile.mkdtemp()
+    if os.geteuid() == 0:
+        shutil.chown(workdir, SCRIPT_USER, SCRIPT_USER)
+    return workdir
+
+# ---------- Background jobs with live log ----------
+
+JOBS = {
+    'fetch-feeds': ('Fetch feeds', ['python3', '/app/nsm.py']),
+    'send-txt': ('Send TXT', ['python3', '/app/pocket-mailer.py']),
+    'send-epub': ('Send EPUB', ['python3', '/app/pocket-mailer-epub.py']),
+}
+JOB_MAX_LINES = 5000
+
+class Job:
+    """One run of a script; its output is kept in memory for the live log."""
+
+    def __init__(self, name):
+        self.name = name
+        self.label, self.args = JOBS[name]
+        self.lines = []
+        self.dropped = 0  # lines removed from the start because of JOB_MAX_LINES
+        self.started = date_time_now()
+        self.finished = None
+        self.returncode = None
+
+    def run(self):
+        workdir = script_workdir()
+        try:
+            proc = subprocess.Popen(self.args, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, errors='replace', bufsize=1, **script_kwargs())
+            for line in proc.stdout:
+                self.add_line(line.rstrip('\n'))
+            self.returncode = proc.wait()
+        except Exception as e:
+            self.add_line(f'Could not run the script: {e}')
+            self.returncode = -1
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+            self.finished = date_time_now()
+
+    def add_line(self, line):
+        self.lines.append(line)
+        excess = len(self.lines) - JOB_MAX_LINES
+        if excess > 0:
+            del self.lines[:excess]
+            self.dropped += excess
+
+    def state(self, since=0):
+        """State and the output lines from line number since on."""
+        start = max(since - self.dropped, 0)
+        return {'name': self.name, 'label': self.label, 'running': self.finished is None,
+                'returncode': self.returncode, 'started': self.started, 'finished': self.finished,
+                'lines': self.lines[start:], 'next': self.dropped + len(self.lines)}
+
+_jobs = {}
+_jobs_lock = threading.Lock()
+
+def date_time_now():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def start_job(name):
+    """Start the job unless it is already running; returns (job, started)."""
+    with _jobs_lock:
+        job = _jobs.get(name)
+        if job and job.finished is None:
+            return job, False
+        job = _jobs[name] = Job(name)
+    threading.Thread(target=job.run, daemon=True).start()
+    return job, True
+
 # ---------- Read later ----------
 
 MAX_URL_LENGTH = 2000
@@ -97,7 +196,7 @@ def start_readlater_worker():
 def _readlater_worker():
     while True:
         try:
-            subprocess.run(['python3', '/app/pocket-ersatz.py', '--queue-only'])
+            run_script(['python3', '/app/pocket-ersatz.py', '--queue-only'])
         except Exception as e:
             print(f"Read-later run failed: {e}", flush=True)
         with _worker_lock:
@@ -142,6 +241,104 @@ def save_readlater():
     return render_template('saved.html', ok=ok, message=message, url=request.args.get('url', ''),
                            title=request.args.get('title', '')), status
 
+# ---------- Feed status ----------
+
+@app.route('/api/status', methods=['GET'])
+def feed_status():
+    """Per feed: last successful fetch, articles sent, current error (see feeddb)."""
+    feeds = common.load_feeds()
+    entries = [(section, feeds[section].get('url', ''), feeds[section].get('active', 'True') != 'False')
+               for section in feeds.sections()]
+    db = feeddb.open_db()
+    try:
+        return jsonify(feeddb.feed_overview(db, entries))
+    finally:
+        db.close()
+
+# ---------- Feed discovery ----------
+
+# not application/json: WordPress links its REST API that way
+FEED_TYPES = {'application/rss+xml', 'application/atom+xml', 'application/feed+json', 'application/rdf+xml',
+              'application/x-rss+xml', 'text/xml', 'application/xml'}
+# tried if the page doesn't link a feed
+COMMON_FEED_PATHS = ['/feed', '/rss', '/feed.xml', '/rss.xml', '/atom.xml', '/index.xml', '/feed/']
+DISCOVERY_TIMEOUT = 15
+
+def fetch_url(url):
+    response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=DISCOVERY_TIMEOUT)
+    response.raise_for_status()
+    return response
+
+def as_feed(response):
+    """{'url', 'title'} if the response is a feed, else None."""
+    parsed = feedparser.parse(response.content)
+    if parsed.get('version') and (parsed.entries or parsed.feed.get('title')):
+        return {'url': response.url, 'title': parsed.feed.get('title', '')}
+    return None
+
+def discover_feeds(url):
+    """Feeds for a URL: the URL itself if it is a feed, else the feeds the page links with
+    <link rel="alternate">, else feeds at the usual paths."""
+    response = fetch_url(url)
+    feed = as_feed(response)
+    if feed:
+        return [feed]
+    found = []
+    soup = BeautifulSoup(response.content, 'html.parser')
+    for link in soup.find_all('link', href=True):
+        rel = [r.lower() for r in (link.get('rel') or [])]
+        if 'alternate' in rel and (link.get('type') or '').split(';')[0].strip().lower() in FEED_TYPES:
+            href = urljoin(response.url, link['href'])
+            if urlparse(href).scheme in ('http', 'https') and all(f['url'] != href for f in found):
+                found.append({'url': href, 'title': (link.get('title') or '').strip()})
+    if found:
+        return found
+    for path in COMMON_FEED_PATHS:
+        try:
+            feed = as_feed(fetch_url(urljoin(response.url, path)))
+        except requests.RequestException:
+            continue
+        if feed:
+            return [feed]
+    return []
+
+@app.route('/api/discover-feed', methods=['POST'])
+def discover_feed():
+    url = ((request.get_json(silent=True) or {}).get('url') or '').strip()
+    if '://' not in url:
+        url = 'https://' + url
+    if urlparse(url).scheme not in ('http', 'https') or not urlparse(url).netloc:
+        return jsonify({'error': 'Please enter a web address starting with http:// or https://.'}), 400
+    try:
+        feeds = discover_feeds(url)
+    except requests.RequestException as e:
+        return jsonify({'error': f'The page could not be loaded: {e}'}), 502
+    if not feeds:
+        return jsonify({'error': 'No feed found on this page.'}), 404
+    return jsonify({'feeds': feeds})
+
+# ---------- Logs ----------
+
+LOG_NAMES = ['nsm', 'pocket-ersatz', 'archive-sort', 'pocket-mailer', 'pocket-mailer-epub']
+LOG_TAIL_BYTES = 200_000  # roughly the last 2000 lines
+
+@app.route('/api/logs/<name>', methods=['GET'])
+def show_log(name):
+    """The end of a script's log file (see common.setup_logging)."""
+    if name not in LOG_NAMES:
+        return 'Unknown log', 404
+    path = os.path.join(common.LOG_DIR, f'{name}.log')
+    try:
+        with open(path, 'rb') as f:
+            f.seek(max(0, os.path.getsize(path) - LOG_TAIL_BYTES))
+            data = f.read()
+    except FileNotFoundError:
+        return Response('No log yet, the script hasn\'t run since logging was set up.', mimetype='text/plain')
+    text = data.decode('utf-8', errors='replace')
+    if len(data) == LOG_TAIL_BYTES:
+        text = text.split('\n', 1)[-1]  # drop the cut-off first line
+    return Response(text, mimetype='text/plain')
+
 @app.route('/api/readlater', methods=['GET'])
 def readlater_list():
     db = readlater.open_db()
@@ -160,17 +357,16 @@ def readlater_add():
 
 CRON_SCRIPTS = r'(?:nsm|pocket-ersatz|archive-sort|pocket-mailer|pocket-mailer-epub)\.py'
 CRON_LINE = re.compile(
-    r'^(?:[0-9*/,-]+\s+){5}root\s+'
-    r'(?:'
-    r'(?:/opt/venv/bin/)?python3\s+/app/' + CRON_SCRIPTS + r'(?:\s+--[a-z-]+(?:=[\w./-]+)?)*(?:\s+>>\s*/app/[\w.-]+\.log\s+2>&1)?'
-    r'|rm -r /tmp/\*'
-    r'|pkill -f (?:/usr/local/bin/geckodriver|/opt/firefox/)'
+    r'^(?:[0-9*/,-]+\s+){5}(?:'
+    r'nsm\s+(?:/opt/venv/bin/)?python3\s+/app/' + CRON_SCRIPTS + r'(?:\s+--[a-z-]+(?:=[\w./-]+)?)*(?:\s+>>\s*/app/(?:data/)?[\w.-]+\.log\s+2>&1)?'
+    r'|root\s+(?:rm -r /tmp/\*|pkill -f (?:/usr/local/bin/geckodriver|/opt/firefox/))'
     r')\s*;?\s*$'
 )
 
 def invalid_crontab_lines(content):
-    """Return the lines that are not a schedule for one of the app's scripts or maintenance jobs.
-    The jobs run as root, so a free-form crontab would allow running any command."""
+    """Return the lines that are not a schedule for one of the app's scripts (as user nsm) or
+    maintenance jobs (as root). Cron runs the file as root, so a free-form crontab would allow
+    running any command."""
     return [line for line in content.splitlines()
             if line.strip() and not line.lstrip().startswith('#') and not CRON_LINE.match(line.strip())]
 
@@ -194,10 +390,10 @@ def needs_setup():
 def index():
     ensure_data_files()
     # Read the contents of the files with utf-8 encoding
-    config_content = read_file('/app/data/config.cfg')
-    feeds_content = read_file('/app/data/feeds.cfg')
-    filter_content = read_file('/app/data/filter.txt')
-    killfile_content = read_file('/app/data/killfile.txt')  # Added killfile handling
+    config_content = read_file(CONFIG_PATH)
+    feeds_content = read_file(common.FEEDS_PATH)
+    filter_content = read_file(common.FILTER_PATH)
+    killfile_content = read_file(common.KILLFILE_PATH)  # Added killfile handling
 
     # Read the crontab
     try:
@@ -244,42 +440,42 @@ def save():
     bad_lines = invalid_crontab_lines(crontab_content) if crontab_changed else []
     if bad_lines:
         return jsonify({'error': 'Crontab not saved, nothing was saved. Only schedules for the '
-                                 'scripts in /app are allowed, e.g. "58 * * * * root /opt/venv/bin/python3 '
+                                 'scripts in /app are allowed, e.g. "58 * * * * nsm /opt/venv/bin/python3 '
                                  '/app/nsm.py". Rejected lines: ' + ' | '.join(bad_lines)}), 400
 
     # Save config.cfg if changed
     try:
-        current_config = normalize(read_file('/app/data/config.cfg'))
+        current_config = normalize(read_file(CONFIG_PATH))
     except FileNotFoundError:
         current_config = ""
     if current_config != normalize(config_content):
-        write_file('/app/data/config.cfg', config_content)
+        write_file(CONFIG_PATH, config_content)
 
     # Save feeds.cfg if changed
     try:
-        current_feeds = normalize(read_file('/app/data/feeds.cfg'))
+        current_feeds = normalize(read_file(common.FEEDS_PATH))
     except FileNotFoundError:
         current_feeds = ""
     created_folders, folder_error = [], None
     if current_feeds != normalize(feeds_content):
-        write_file('/app/data/feeds.cfg', feeds_content)
+        write_file(common.FEEDS_PATH, feeds_content)
         created_folders, folder_error = create_missing_feed_folders()
 
     # Save filter.txt if changed
     try:
-        current_filter = normalize(read_file('/app/data/filter.txt'))
+        current_filter = normalize(read_file(common.FILTER_PATH))
     except FileNotFoundError:
         current_filter = ""
     if current_filter != normalize(filter_content):
-        write_file('/app/data/filter.txt', filter_content)
+        write_file(common.FILTER_PATH, filter_content)
 
     # Save killfile.txt if changed
     try:
-        current_killfile = normalize(read_file('/app/data/killfile.txt'))
+        current_killfile = normalize(read_file(common.KILLFILE_PATH))
     except FileNotFoundError:
         current_killfile = ""
     if current_killfile != normalize(killfile_content):
-        write_file('/app/data/killfile.txt', killfile_content)
+        write_file(common.KILLFILE_PATH, killfile_content)
 
     # Save crontab if changed
     try:
@@ -294,35 +490,48 @@ def save():
 
     return jsonify({'created_folders': created_folders, 'folder_error': folder_error})
 
-@app.route('/fetch-feeds', methods=['POST'])
-def fetch_feeds():
-    try:
-        subprocess.run(['python3', '/app/nsm.py'], check=True)
-        return "Feeds fetched successfully!"
-    except subprocess.CalledProcessError as e:
-        return f"Error fetching feeds: {e}", 500
+NSM_LOCK_PATH = common.data_path('nsm.lock')  # held by nsm.py while it runs
 
-@app.route('/send-txt', methods=['POST'])
-def send_txt():
-    try:
-        subprocess.run(['python3', '/app/pocket-mailer.py'], check=True)
-        return "TXT emails sent successfully!"
-    except subprocess.CalledProcessError as e:
-        return f"Error sending TXT emails: {e}", 500
+def nsm_running():
+    with open(NSM_LOCK_PATH, 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    return False
 
-@app.route('/send-epub', methods=['POST'])
-def send_epub():
-    try:
-        subprocess.run(['python3', '/app/pocket-mailer-epub.py'], check=True)
-        return "EPUB emails sent successfully!"
-    except subprocess.CalledProcessError as e:
-        return f"Error sending EPUB emails: {e}", 500
+@app.route('/api/jobs', methods=['GET'])
+def list_jobs():
+    """The last run of every job (without output), e.g. to show a running job after a reload."""
+    with _jobs_lock:
+        return jsonify({name: {k: v for k, v in job.state().items() if k != 'lines'} for name, job in _jobs.items()})
+
+@app.route('/api/jobs/<name>', methods=['POST'])
+def run_job(name):
+    """Start a script in the background; the page follows its output via GET."""
+    if name not in JOBS:
+        return jsonify({'error': 'Unknown job'}), 404
+    with _jobs_lock:
+        own_run = name in _jobs and _jobs[name].finished is None
+    if name == 'fetch-feeds' and not own_run and nsm_running():
+        return jsonify({'error': 'A feed run (cronjob) is already in progress. Its output is in the Logs tab.'}), 409
+    job, started = start_job(name)
+    return jsonify({**job.state(), 'already_running': not started})
+
+@app.route('/api/jobs/<name>', methods=['GET'])
+def job_state(name):
+    with _jobs_lock:
+        job = _jobs.get(name)
+    if not job:
+        return jsonify({'error': 'Not started yet'}), 404
+    return jsonify(job.state(request.args.get('since', 0, type=int)))
 
 def generate_download(script, filename, download_name, mimetype, extra_args=()):
     """Run a mailer script with --no-mail in a temp dir and return the generated file."""
-    workdir = tempfile.mkdtemp()
+    workdir = script_workdir()
     try:
-        subprocess.run(['python3', script, '--no-mail', *extra_args], cwd=workdir, check=True)
+        run_script(['python3', script, '--no-mail', *extra_args], cwd=workdir, check=True)
         with open(os.path.join(workdir, filename), 'rb') as f:
             data = io.BytesIO(f.read())
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -378,12 +587,11 @@ def create_missing_feed_folders():
     Returns (created folder names, error message or None). A failing IMAP connection
     must not break saving, so errors are reported instead of raised.
     """
-    feeds = configparser.ConfigParser()
-    feeds.read('/app/data/feeds.cfg', encoding='utf-8')
+    feeds = common.load_feeds()
     wanted = {feeds[section].get('imap-mailbox', 'INBOX').strip() for section in feeds.sections()}
     wanted.discard('')
     config = configparser.ConfigParser()
-    config.read('/app/data/config.cfg')
+    config.read(CONFIG_PATH)
     created = []
     try:
         imap = config['IMAP']
@@ -411,9 +619,8 @@ def check_imap(host, user, password):
 
 def check_smtp(host, port, user, password):
     """Log in the way the scripts do (SMTP with STARTTLS)."""
-    with smtplib.SMTP(host, int(port), timeout=15) as server:
-        server.starttls()
-        server.login(user, password)
+    with common.smtp_connection(host, port, user, password, timeout=15):
+        pass
 
 @app.route('/api/setup/test', methods=['POST'])
 def setup_test():
@@ -511,7 +718,7 @@ def setup_save():
 def list_folders():
     """List the IMAP folders of the feed mailbox (used for folder suggestions in the GUI)."""
     config = configparser.ConfigParser()
-    config.read('/app/data/config.cfg')
+    config.read(CONFIG_PATH)
     try:
         imap = config['IMAP']
         with MailBox(imap['imapHost'], timeout=15).login(imap['imapUser'], imap['imapPasscode'], initial_folder=None) as mailbox:
@@ -522,12 +729,10 @@ def list_folders():
 @app.route('/export-opml', methods=['GET'])
 def export_opml():
     """Export feeds.cfg as an OPML file."""
-    feeds_path = '/app/data/feeds.cfg'
-    opml_path = '/app/data/feeds.opml'
+    opml_path = common.data_path('feeds.opml')
 
     # Parse feeds.cfg
-    config = configparser.ConfigParser()
-    config.read(feeds_path)
+    config = common.load_feeds()
 
     # Create OPML structure
     opml = Element('opml')
@@ -575,9 +780,8 @@ def import_opml():
         return "Invalid OPML file", 400
 
     # Update feeds.cfg
-    config = configparser.ConfigParser()
-    feeds_path = '/app/data/feeds.cfg'
-    config.read(feeds_path)
+    feeds_path = common.FEEDS_PATH
+    config = common.load_feeds(feeds_path)
 
     added_feeds = []
     updated_feeds = []

@@ -1,6 +1,3 @@
-import configparser
-import smtplib
-import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import re
@@ -8,7 +5,7 @@ from imap_tools import MailBox
 import trafilatura
 from bs4 import BeautifulSoup
 import markdown
-import openai as ai
+import html as html_lib
 import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -23,26 +20,17 @@ import sys
 import argparse
 import fcntl
 import readlater
+import common
 
-script_directory = os.path.dirname(os.path.abspath(__file__))
 geckodriver_path = "/usr/local/bin/geckodriver"  # specify the path to your geckodriver
 
 #E-Mail-Configuration
-config = configparser.ConfigParser()
-configpath = os.path.join(script_directory , "/app/data/config.cfg")
-config.read(configpath)
-mail_dict = dict(config)
-
-imapHost = mail_dict['IMAP-Artikelpostfach']['imapHost']
-imapUser = mail_dict['IMAP-Artikelpostfach']['imapUser']
-imapPasscode = mail_dict['IMAP-Artikelpostfach']['imapPasscode']
-Eingangsordner = mail_dict['IMAP-Artikelpostfach']['Eingangsordner']
-#Konfiguration SMTP
-port = mail_dict['SMTP-Artikelpostfach']['port']
-smtp_server = mail_dict['SMTP-Artikelpostfach']['smtp_server']
-sender_email = mail_dict['SMTP-Artikelpostfach']['sender_email']
-receiver_email = mail_dict['SMTP-Artikelpostfach']['receiver_email']
-password = mail_dict['SMTP-Artikelpostfach']['password']
+config = common.load_config()
+imapHost = config['IMAP-Artikelpostfach']['imapHost']
+imapUser = config['IMAP-Artikelpostfach']['imapUser']
+imapPasscode = config['IMAP-Artikelpostfach']['imapPasscode']
+Eingangsordner = config['IMAP-Artikelpostfach']['Eingangsordner']
+smtp_config = config['SMTP-Artikelpostfach']
 
 
 #setup selenium
@@ -61,7 +49,7 @@ firefox_options.binary_location = "/usr/local/bin/firefox"
 driver = None
 
 # Max. Laufzeit pro Durchgang: Der Cronjob beendet Firefox um :15, pocket-ersatz startet um :36.
-# Was nicht mehr in die Zeit passt, bleibt im Posteingang und kommt beim nächsten Lauf dran.
+# Was nicht mehr in die Zeit passt, bleibt in der Warteschlange und kommt beim nächsten Lauf dran.
 MAX_RUNTIME = 30 * 60  # Sekunden
 
 def start_driver():
@@ -73,9 +61,6 @@ def start_driver():
     return d
 
 
-
-#OpenAI API-Key
-ai.api_key = mail_dict['options']['openai-key']
 
 def getarticleandsendmail(artikel, fallback_title=None):
     
@@ -105,29 +90,16 @@ def getarticleandsendmail(artikel, fallback_title=None):
     laengetext = len(h.split()) #berechnet wortanzahl
     laengetextstr = str(laengetext)
 
-#AI-Krams
-    try:
-        anfrage = "Write a summary of this article in 5 bulletpoints. Put a * in front of each bulletpoint. Make two linebreaks after each bulletpoint. Write the summary in German. Also add 5 Tags based on the article. Put two ## in front of each tag  " + heruntergeladenertextinhtml 
-        response = ai.Completion.create(
-        engine="text-curie-001",
-        prompt=anfrage,
-        temperature=0.3,
-        max_tokens=709,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0
-        )
-        zusammenfassung = response.choices[0].text
-    except:
-        zusammenfassung = ""    
 #definiere nachricht
     message = MIMEMultipart("alternative")
     message["Subject"] = titeldesdokuments
-    message["From"] = sender_email
-    message["To"] = receiver_email
-# hier zusammensetzung der mail, das kann man sicherlich noch verbessern
-    text = "\n\n====================\n\n <br>Titel: " + titeldesdokuments + " \n\n<br>URL: " + '<a href="' + artikel + '">' + artikel + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + zusammenfassung + "n\n <br>====================\n\n\n<br>" + heruntergeladenertextinhtml
-    html = "\n\n====================\n\n <br>Titel: " + titeldesdokuments + " \n\n<br>URL: " + '<a href="' + artikel + '">' + artikel + '</a>' + "\n\n <br>Länge: " + laengetextstr + " Wörter" + "\n\n\n" + zusammenfassung + "\n\n <br>====================\n\n\n<br>" + heruntergeladenertextinhtml
+# hier zusammensetzung der mail: Textteil mit dem Markdown von trafilatura, HTML-Teil escaped
+    text = ("====================\n\nTitel: " + titeldesdokuments + "\nURL: " + artikel
+            + "\nLänge: " + laengetextstr + " Wörter\n\n====================\n\n" + h)
+    titel_html = html_lib.escape(titeldesdokuments)
+    url_html = html_lib.escape(artikel)
+    html = ("====================<br>Titel: " + titel_html + "<br>URL: " + '<a href="' + url_html + '">' + url_html + '</a>'
+            + "<br>Länge: " + laengetextstr + " Wörter<br>====================<br><br>" + heruntergeladenertextinhtml)
 
     part1 = MIMEText(text, "plain")
     part2 = MIMEText(html, "html")
@@ -135,14 +107,11 @@ def getarticleandsendmail(artikel, fallback_title=None):
     message.attach(part2)
 
 #absenden mail
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, port) as server:
-        server.starttls(context=context)
-        server.login(sender_email, password)
-        server.sendmail(sender_email, receiver_email, message.as_string())
+    common.send_mail(smtp_config, message)
     print("Mail gesendet")
     
-LOCK_PATH = "/app/data/pocket-ersatz.lock"
+LOCK_PATH = common.data_path("pocket-ersatz.lock")
+ARCHIVE_FOLDER = "Archiv"  # processed mails of the Artikelpostfach
 
 
 def fetch_and_send(url, title=None):
@@ -186,35 +155,36 @@ def process_queue(start):
     db.close()
 
 
-def process_mailbox(start):
-    """Links mailed to the Artikelpostfach."""
-    with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
-        for nachricht in mailbox.fetch(bulk=True):
-            if not time_left(start):
-                print("Zeitlimit erreicht, restliche Mails beim nächsten Lauf")
-                break
-            emailinhalt = nachricht.text or nachricht.html
-            #mailbox.delete(nachricht.uid)
-            mailbox.move(nachricht.uid, 'Archiv')
-            print(emailinhalt)
-            #regex durchsucht inhalt der Mails nach URLs
-            regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
-            matches = re.findall(regex, emailinhalt)
-            print(matches)
-            #aktiviere pro Mail die Volltextmailingfunktion
-            for m in matches:
-                m = m.strip('<>')
-                try:
-                    fetch_and_send(m)
-                except Exception as e:
-                    print("Fehler bei " + m + ": " + str(e))
-            print("m erledigt")
+def process_mailbox():
+    """Links mailed to the Artikelpostfach. They are only put into the queue here, so a link
+    that fails is retried like the ones from the web interface; the mail is archived only once
+    its links are queued."""
+    regex = r'<?http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+>?'
+    db = readlater.open_db()
+    try:
+        with MailBox(imapHost).login(imapUser, imapPasscode, 'INBOX') as mailbox:
+            # Without the archive folder the mails would stay in the inbox and their links
+            # would be queued (and mailed) again on every run
+            if not mailbox.folder.exists(ARCHIVE_FOLDER):
+                mailbox.folder.create(ARCHIVE_FOLDER)
+            for nachricht in mailbox.fetch(bulk=True):
+                emailinhalt = nachricht.text or nachricht.html or ""
+                print("Mail: " + str(nachricht.subject))
+                #regex durchsucht inhalt der Mails nach URLs
+                matches = [m.strip('<>') for m in re.findall(regex, emailinhalt)]
+                print(matches)
+                for m in matches:
+                    readlater.add(db, m)
+                mailbox.move(nachricht.uid, ARCHIVE_FOLDER)
+    finally:
+        db.close()
 
 
 parser = argparse.ArgumentParser(description="Fetch read-later articles with Firefox and mail them.")
 parser.add_argument("--queue-only", action="store_true",
                     help="only process the links saved via the web interface, not the Artikelpostfach")
 args = parser.parse_args()
+common.setup_logging("pocket-ersatz")
 
 # Only one run at a time (cron and the web interface may start one); a second one waits
 with open(LOCK_PATH, "w") as lock:
@@ -222,11 +192,12 @@ with open(LOCK_PATH, "w") as lock:
     # Max. Laufzeit zählt ab hier, nicht ab dem Warten auf den Lock
     start = time.monotonic()
     try:
-        process_queue(start)
         if not args.queue_only:
-            process_mailbox(start)
-            # links saved while the mailbox was processed
-            process_queue(start)
+            try:
+                process_mailbox()
+            except Exception as e:
+                print("Fehler beim Artikelpostfach: " + str(e))
+        process_queue(start)
     finally:
         # Firefox + geckodriver immer beenden, auch bei Fehlern oder sys.exit()
         if driver is not None:

@@ -343,6 +343,35 @@
         @media (max-width: 700px) { .wz-row { grid-template-columns: 1fr 90px; } }
         .file-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+        /* ---------- Logs ---------- */
+        .log-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+        .log-controls select { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); max-width: 100%; }
+        .log-view {
+            font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 12px 14px; margin: 0; height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+        }
+
+        /* ---------- Jobs and status ---------- */
+        .job-panel { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+        .job-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .job-head button { margin-left: auto; }
+        .job-state { font-size: 13px; color: var(--muted); }
+        .job-state.ok { color: var(--success); }
+        .job-state.failed { color: var(--danger); }
+        .job-log { height: 40vh; }
+        .status-table td { padding: 9px 8px; white-space: nowrap; }
+        .status-table td:first-child { white-space: normal; font-weight: 550; }
+        .status-table td.num, .status-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .status-table .url { display: block; font-weight: 400; font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+        .pill { display: inline-block; font-size: 12.5px; font-weight: 550; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+        .pill.ok { background: var(--success-soft); color: var(--success); }
+        .pill.failed { background: var(--danger-soft); color: var(--danger); cursor: help; }
+        .status-table .since { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .feed-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; font-size: 13px; }
+        .url-detect { display: flex; gap: 6px; }
+        .url-detect input { flex: 1; min-width: 0; }
+
         /* ---------- FAQ ---------- */
         .prose { max-width: 76ch; }
         .prose p, .prose li { color: var(--text); }
@@ -439,6 +468,8 @@
                 <button type="button" class="tab" data-tab="killfile">Killfile</button>
                 <button type="button" class="tab" data-tab="crontab">Crontab</button>
                 <button type="button" class="tab" data-tab="actions">Actions</button>
+                <button type="button" class="tab" data-tab="status">Status</button>
+                <button type="button" class="tab" data-tab="logs">Logs</button>
                 <button type="button" class="tab" data-tab="FAQ">FAQ</button>
             </nav>
         </div>
@@ -483,7 +514,7 @@
             <div class="tab-header">
                 <h2>Crontab <span class="filename">/etc/cron.d/myjobs</span></h2>
             </div>
-            <p class="hint">Jobs run as root, so only schedules for the scripts in <code>/app</code> are accepted, e.g. <code>58 * * * * root /opt/venv/bin/python3 /app/nsm.py</code>.</p>
+            <p class="hint">Only schedules for the scripts in <code>/app</code> (as user <code>nsm</code>) and the maintenance jobs (as <code>root</code>) are accepted, e.g. <code>58 * * * * nsm /opt/venv/bin/python3 /app/nsm.py</code>.</p>
             <textarea name="crontab" spellcheck="false">{{ crontab }}</textarea>
         </div>
         <div id="actions" class="tab-content">
@@ -497,15 +528,15 @@
                     <div class="action-list">
                         <div class="action-item">
                             <div><strong>Fetch feeds</strong><span>Deliver new articles to your mailbox</span></div>
-                            <button type="button" onclick="runScript('fetch-feeds', this)">Run</button>
+                            <button type="button" data-job="fetch-feeds" onclick="runJob('fetch-feeds')">Run</button>
                         </div>
                         <div class="action-item">
                             <div><strong>Send TXT</strong><span>Mail the read-later folder as text</span></div>
-                            <button type="button" onclick="runScript('send-txt', this)">Send</button>
+                            <button type="button" data-job="send-txt" onclick="runJob('send-txt')">Send</button>
                         </div>
                         <div class="action-item">
                             <div><strong>Send EPUB</strong><span>Mail the read-later folder as ePub</span></div>
-                            <button type="button" onclick="runScript('send-epub', this)">Send</button>
+                            <button type="button" data-job="send-epub" onclick="runJob('send-epub')">Send</button>
                         </div>
                     </div>
                 </section>
@@ -564,6 +595,47 @@
                     </div>
                 </section>
             </div>
+            <section class="job-panel" id="job-panel" hidden>
+                <div class="job-head">
+                    <strong id="job-title"></strong>
+                    <span class="job-state" id="job-state"></span>
+                    <button type="button" class="ghost" onclick="closeJob()">Close</button>
+                </div>
+                <pre class="log-view job-log" id="job-log" aria-live="polite"></pre>
+            </section>
+        </div>
+        <div id="status" class="tab-content">
+            <div class="tab-header">
+                <h2>Status</h2>
+                <button type="button" class="secondary" onclick="loadStatus(this)">Reload</button>
+            </div>
+            <p class="hint">Updated by every feed run. "Sent" counts the articles mailed since this page exists; links from before are in "known".</p>
+            <div class="feed-table-wrap">
+                <table class="feed-table status-table">
+                    <thead><tr>
+                        <th>Feed</th><th>State</th><th>Last successful fetch</th><th>Last article</th>
+                        <th class="num">Sent (30 days)</th><th class="num">Sent</th><th class="num">Known</th>
+                    </tr></thead>
+                    <tbody id="status-body"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="logs" class="tab-content">
+            <div class="tab-header">
+                <h2>Logs <span class="filename" id="log-file">/app/data/logs/</span></h2>
+                <div class="log-controls">
+                    <select id="log-name" aria-label="Log">
+                        <option value="nsm">Fetch feeds (nsm.py)</option>
+                        <option value="pocket-ersatz">Read later (pocket-ersatz.py)</option>
+                        <option value="archive-sort">Archive sort (archive-sort.py)</option>
+                        <option value="pocket-mailer">TXT export (pocket-mailer.py)</option>
+                        <option value="pocket-mailer-epub">EPUB export (pocket-mailer-epub.py)</option>
+                    </select>
+                    <button type="button" class="secondary" onclick="loadLog(this)">Reload</button>
+                </div>
+            </div>
+            <p class="hint">Output of the scripts, newest at the bottom. The files are rotated at 1 MB.</p>
+            <pre class="log-view" id="log-view"></pre>
         </div>
         <div id="FAQ" class="tab-content">
             <div class="tab-header">
@@ -612,17 +684,11 @@ You can deliver your mails to subfolders, which I highly recommend. Just create 
 Filterfolder:
 the mail folder where you want to move your filtered mails
 
-OpenAI Key:
-Currently deactivated by default: If you want, you can put in your OpenAI key here and configure nsm.py to include a summary of the article or to provide tags. I deactivated this because the costs did not justify the benefits for me.
-
 backup_to_archiveorg:
-Currently not functional
-
-[cronjobs]
 Currently not functional</pre>
 
     <h3>Filter</h3>
-    <p>Put in keywords here (one per line) and if the keyword is included in a mail subject, the mail will be moved to the folder you've configured in configuration → Filterfolder.</p>
+    <p>Put in keywords here (one per line) and if the keyword is included in an article's title, the article is put into the folder you've configured in configuration → Filterfolder instead of its feed folder.</p>
 
     <h4>How does this work?</h4>
     <ul>
@@ -790,7 +856,26 @@ Currently not functional</pre>
             history.replaceState(null, '', '#/' + tabName);  // '#/' so the browser doesn't jump to the element
         }
         document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
+
+        // ---------- Logs ----------
+        function loadLog(button) {
+            const name = document.getElementById('log-name').value;
+            const view = document.getElementById('log-view');
+            document.getElementById('log-file').textContent = `/app/data/logs/${name}.log`;
+            if (button) setBusy(button, true);
+            fetch(`/api/logs/${encodeURIComponent(name)}`)
+                .then(response => response.text().then(text => {
+                    if (!response.ok) throw new Error(text);
+                    view.textContent = text;
+                    view.scrollTop = view.scrollHeight;
+                }))
+                .catch(error => toast('Error: ' + error.message, 'error'))
+                .finally(() => { if (button) setBusy(button, false); });
+        }
+        document.getElementById('log-name').addEventListener('change', () => loadLog());
+        document.querySelector('.tab[data-tab="logs"]').addEventListener('click', () => loadLog());
         showTab(location.hash.replace(/^#\/?/, ''));
+        if (location.hash === '#/logs') loadLog();
 
         // ---------- Toasts ----------
         function toast(message, type = 'success') {
@@ -815,18 +900,107 @@ Currently not functional</pre>
             button.classList.toggle('busy', busy);
         }
 
-        function runScript(action, button) {
-            setBusy(button, true);
-            fetch(`/${action}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            })
-            .then(response => response.text().then(data => toast(data, response.ok ? 'success' : 'error')))
-            .catch(error => toast('Error: ' + error, 'error'))
-            .finally(() => setBusy(button, false));
+        // ---------- Background jobs with live log ----------
+        let jobTimer = null;
+        let jobName = null;
+
+        function jobButton(name) {
+            return document.querySelector(`[data-job="${name}"]`);
         }
+
+        function runJob(name) {
+            fetch(`/api/jobs/${name}`, { method: 'POST' })
+                .then(response => response.json().then(data => {
+                    if (!response.ok) throw new Error(data.error || response.statusText);
+                    if (data.already_running) toast(`${data.label} is already running.`);
+                    followJob(name);
+                }))
+                .catch(error => toast('Error: ' + error.message, 'error'));
+        }
+
+        function followJob(name, announce = true) {
+            clearTimeout(jobTimer);
+            if (jobName && jobName !== name) setBusy(jobButton(jobName), false);
+            jobName = name;
+            const panel = document.getElementById('job-panel');
+            const log = document.getElementById('job-log');
+            const state = document.getElementById('job-state');
+            panel.hidden = false;
+            log.textContent = '';
+            setBusy(jobButton(name), true);
+            let since = 0;
+            const poll = () => fetch(`/api/jobs/${name}?since=${since}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (jobName !== name) return;
+                    document.getElementById('job-title').textContent = data.label;
+                    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+                    if (data.lines.length) log.append(data.lines.join('\n') + '\n');
+                    if (atBottom) log.scrollTop = log.scrollHeight;
+                    since = data.next;
+                    if (data.running) {
+                        state.className = 'job-state';
+                        state.textContent = `running since ${data.started}`;
+                        jobTimer = setTimeout(poll, 1000);
+                        return;
+                    }
+                    const ok = data.returncode === 0;
+                    state.className = 'job-state ' + (ok ? 'ok' : 'failed');
+                    state.textContent = ok ? `finished ${data.finished}` : `failed (exit code ${data.returncode}) ${data.finished}`;
+                    setBusy(jobButton(name), false);
+                    if (announce) toast(ok ? `${data.label} finished.` : `${data.label} failed, see the log.`, ok ? 'success' : 'error');
+                })
+                .catch(() => { jobTimer = setTimeout(poll, 3000); });
+            poll();
+            panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function closeJob() {
+            clearTimeout(jobTimer);
+            if (jobName) setBusy(jobButton(jobName), false);
+            jobName = null;
+            document.getElementById('job-panel').hidden = true;
+        }
+
+        // After a reload: show a job that is still running
+        fetch('/api/jobs').then(response => response.json()).then(jobs => {
+            const running = Object.values(jobs).find(job => job.running);
+            if (running) followJob(running.name);
+        }).catch(() => {});
+
+        // ---------- Feed status ----------
+        function loadStatus(button) {
+            if (button) setBusy(button, true);
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(feeds => {
+                    const body = document.getElementById('status-body');
+                    const cell = (content, cls) => el('td', cls ? { class: cls } : {}, content);
+                    body.replaceChildren(...feeds.map(f => {
+                        let pill;
+                        if (!f.active) pill = el('span', { class: 'pill' }, ['paused']);
+                        else if (f.last_error) pill = el('span', { class: 'pill failed', title: f.last_error }, ['failing']);
+                        else if (f.last_success) pill = el('span', { class: 'pill ok' }, ['OK']);
+                        else pill = el('span', { class: 'pill' }, ['not run yet']);
+                        const state = [pill];
+                        if (f.active && f.last_error && f.failing_since) state.push(el('span', { class: 'since' }, [`since ${f.failing_since}`]));
+                        return el('tr', {}, [
+                            cell([f.name, el('span', { class: 'url' }, [f.url])]),
+                            cell(state),
+                            cell([f.last_success || '–']),
+                            cell([f.last_article || '–']),
+                            cell([String(f.sent_30_days)], 'num'),
+                            cell([String(f.sent_total)], 'num'),
+                            cell([String(f.known)], 'num'),
+                        ]);
+                    }));
+                    if (!feeds.length) body.append(el('tr', { class: 'empty-row' }, [el('td', { colSpan: 7 }, ['No feeds configured.'])]));
+                })
+                .catch(error => toast('Error: ' + error.message, 'error'))
+                .finally(() => { if (button) setBusy(button, false); });
+        }
+        document.querySelector('.tab[data-tab="status"]').addEventListener('click', () => loadStatus());
+        if (location.hash === '#/status') loadStatus();
 
         function downloadFile(action, button) {
             setBusy(button, true);
@@ -1011,9 +1185,9 @@ Currently not functional</pre>
             'IMAP': 'Mailbox your feed articles are delivered to.',
             'IMAP-Artikelpostfach': 'Mailbox you send read-later links to.',
             'Mailings': 'Read-later folder the TXT/EPUB exports are built from.',
-            'SMTP': 'Outgoing server for feed articles and EPUB exports.',
+            'SMTP': 'Outgoing server for error reports and EPUB exports. Feed articles are stored directly via IMAP.',
             'SMTP-Artikelpostfach': 'Outgoing server for read-later articles and TXT exports.',
-            'cronjobs': 'Not used yet. The schedule lives in the crontab tab.',
+            'cronjobs': 'Not used. The schedule lives in the crontab tab.',
         };
         const CONFIG_LABELS = {
             'imaphost': 'Server', 'imapuser': 'User', 'imappasscode': 'Password',
@@ -1021,7 +1195,6 @@ Currently not functional</pre>
             'port': 'Port', 'smtp_server': 'Server', 'sender_email': 'Sender / login',
             'receiver_email': 'Send to', 'password': 'Password',
             'filterfolder': 'Folder for filtered mails', 'backup_to_archiveorg': 'Back up to archive.org',
-            'openai-key': 'OpenAI API key',
         };
         const SECRET_KEY = /pass|key/i;
         const FOLDER_KEYS = ['eingangsordner', 'unread_folder', 'filterfolder'];
@@ -1166,10 +1339,35 @@ Currently not functional</pre>
 
             // "Add feed" form
             const addName = el('input', { type: 'text', placeholder: 'e.g. tagesschau', id: 'add-feed-name' });
-            const addUrl = el('input', { type: 'url', placeholder: 'https://example.org/feed', id: 'add-feed-url' });
+            const addUrl = el('input', { type: 'url', placeholder: 'https://example.org or …/feed', id: 'add-feed-url' });
             const addFolder = el('input', { type: 'text', value: 'INBOX', list: 'imap-folders', id: 'add-feed-folder' });
             const addFulltext = el('input', { type: 'checkbox', id: 'add-feed-fulltext' });
             const addError = el('div', { class: 'error', role: 'alert' });
+            const addFound = el('div', { class: 'feed-found', hidden: true });
+            function useFeed(found) {
+                addUrl.value = found.url;
+                if (!addName.value.trim() && found.title) addName.value = found.title.replace(/[\[\]]/g, '').trim();
+                addFound.hidden = true;
+            }
+            const detect = el('button', { type: 'button', class: 'secondary', textContent: 'Find feed',
+                title: 'Enter a website address and find its RSS/Atom feed', onclick: () => {
+                    if (!addUrl.value.trim()) { addError.textContent = 'Please enter a web address first.'; return; }
+                    addError.textContent = '';
+                    addFound.hidden = true;
+                    setBusy(detect, true);
+                    fetch('/api/discover-feed', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({ url: addUrl.value.trim() }) })
+                        .then(response => response.json().then(data => {
+                            if (!response.ok) throw new Error(data.error || response.statusText);
+                            if (data.feeds.length === 1) { useFeed(data.feeds[0]); return; }
+                            addFound.replaceChildren('Several feeds found:', ...data.feeds.map(found =>
+                                el('button', { type: 'button', class: 'ghost', title: found.url,
+                                               textContent: found.title || found.url, onclick: () => useFeed(found) })));
+                            addFound.hidden = false;
+                        }))
+                        .catch(error => { addError.textContent = error.message; })
+                        .finally(() => setBusy(detect, false));
+                } });
             function addFeed() {
                 const feed = { name: addName.value.trim(), url: addUrl.value.trim(), mailbox: addFolder.value.trim() || 'INBOX',
                                fulltext: addFulltext.checked, active: true, extra: [] };
@@ -1192,11 +1390,12 @@ Currently not functional</pre>
             } }, [
                 el('div', { class: 'grid' }, [
                     el('div', {}, [el('label', { htmlFor: 'add-feed-name' }, ['Name']), addName]),
-                    el('div', {}, [el('label', { htmlFor: 'add-feed-url' }, ['Feed URL']), addUrl]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-url' }, ['Feed or website URL']), el('div', { class: 'url-detect' }, [addUrl, detect])]),
                     el('div', {}, [el('label', { htmlFor: 'add-feed-folder' }, ['Mail folder']), addFolder]),
                     el('div', {}, [el('label', { htmlFor: 'add-feed-fulltext' }, ['Full text']), el('div', { class: 'check' }, [addFulltext])]),
                     el('button', { type: 'button', textContent: 'Add', onclick: addFeed }),
                 ]),
+                addFound,
                 addError,
             ]);
             const addToggle = el('button', { type: 'button', textContent: '+ Add feed', onclick: () => {

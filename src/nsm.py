@@ -1,16 +1,12 @@
 import feedparser
-import configparser
-import smtplib
 from imap_tools import MailBox
-from imap_tools import OR
-from imap_tools import A, H
-from datetime import date
-import ssl
+from imap_tools.errors import ImapToolsError
+import imaplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formatdate, make_msgid
 import requests
 import time
-import sqlite3
 import csv
 import os
 import trafilatura
@@ -19,44 +15,33 @@ import re
 import difflib
 import markdown
 import signal
+import fcntl
+import sys
 import traceback
 import html as html_lib
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 import nh3
+import common
+import feeddb
 
 
 #global values
-script_directory = os.path.dirname(os.path.abspath(__file__))
-
-print(script_directory)
-
-feedliste = configparser.ConfigParser()
-feeddir =  os.path.join(script_directory, "/app/data/feeds.cfg")
-feedliste.read(feeddir)
-db_file_path = "/app/data/nsm.db"
-legacy_tsv_path = "/app/data/urls.tsv"  # pre-SQLite list of mailed URLs, imported once
-print(db_file_path)
+feedliste = common.load_feeds()
+db_file_path = common.DB_PATH
+legacy_tsv_path = common.data_path("urls.tsv")  # pre-SQLite list of mailed URLs, imported once
 
 #E-Mail-Configuration
-config = configparser.ConfigParser()
-configpath = os.path.join(script_directory , "/app/data/config.cfg")
-config.read(configpath)
-mail_dict = dict(config)
-
-imapHost = mail_dict['IMAP']['imapHost']
-imapUser = mail_dict['IMAP']['imapUser']
-imapPasscode = mail_dict['IMAP']['imapPasscode']
-filterfolder = mail_dict['options']['filterfolder']
-  
-#Konfiguration SMTP
-port = mail_dict['SMTP']['port']
-smtp_server = mail_dict['SMTP']['smtp_server']
-sender_email = mail_dict['SMTP']['sender_email']
-receiver_email = mail_dict['SMTP']['receiver_email']
-password = mail_dict['SMTP']['password']
+config = common.load_config()
+imapHost = config['IMAP']['imapHost']
+imapUser = config['IMAP']['imapUser']
+imapPasscode = config['IMAP']['imapPasscode']
+filterfolder = config['options']['filterfolder']
+# SMTP is only used for the error mails, the articles are stored via IMAP
+sender_email = config['SMTP']['sender_email']
+receiver_email = config['SMTP']['receiver_email']
 
 FIRST_RUN_ITEMS = 10    # a newly subscribed feed only mails its newest entries
-REQUEST_TIMEOUT = 60    # seconds for feed/article downloads and SMTP connections
+REQUEST_TIMEOUT = 60    # seconds for feed/article downloads and IMAP connections
 FEED_TIMEOUT = 600      # max. seconds per feed, so a hanging feed can't block the others
 ERROR_MAIL_INTERVAL = 24  # hours; a feed that keeps failing is reported at most this often
 
@@ -70,8 +55,7 @@ def _feed_timeout(signum, frame):
 
 def load_killfile():
     """Load the killfile.txt into a list of phrases (paragraphs separated by blank lines)."""
-    killfile_path = os.path.join(script_directory, "/app/data/killfile.txt")
-    with open(killfile_path, "r", encoding="utf-8") as file:
+    with open(common.KILLFILE_PATH, "r", encoding="utf-8") as file:
         # Blank lines may contain spaces or \r (textarea in the web interface sends \r\n)
         paragraphs = [p.strip() for p in re.split(r"\r?\n\s*\n", file.read()) if p.strip()]
     phrases = []
@@ -232,6 +216,48 @@ class MailSendError(Exception):
     """The mail server couldn't be reached or refused the mail; the article itself is fine."""
 
 
+class ArticleStore:
+    """Puts the articles of one feed straight into their IMAP folder (IMAP APPEND), or into
+    the filterfolder if the subject contains a filter keyword. Logs in on the first article,
+    so feeds without new entries don't open a connection."""
+
+    def __init__(self, folder):
+        self.folder = folder
+        self.filter = load_filter()
+        self.mailbox = None
+
+    def store(self, message, subject):
+        folder = self.folder
+        betreff = subject.lower()
+        matched = [element for element in self.filter if element in betreff]
+        if matched:
+            print("Matched element:", ", ".join(matched))
+            folder = filterfolder
+        try:
+            if self.mailbox is None:
+                self.mailbox = MailBox(imapHost, timeout=REQUEST_TIMEOUT).login(
+                    imapUser, imapPasscode, initial_folder=None)
+            self.mailbox.append(message.as_bytes(), folder)
+        except (ImapToolsError, imaplib.IMAP4.error, OSError) as e:
+            self.close()
+            raise MailSendError(f"Mail could not be stored in {folder}: {e}") from e
+
+    def close(self):
+        if self.mailbox is not None:
+            try:
+                self.mailbox.logout()
+            except Exception:
+                pass
+            self.mailbox = None
+
+
+def load_filter():
+    """Lowercased subject keywords from filter.txt."""
+    with open(common.FILTER_PATH, "r", encoding="utf-8") as file:
+        # an empty keyword would match every subject
+        return [line.strip().lower() for line in file if line.strip()]
+
+
 def is_http_url(url):
     return urlparse(url).scheme.lower() in ("http", "https")
 
@@ -259,7 +285,7 @@ def html_to_text(content):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
+def create_email(artikel_url, artikel_titel, artikel_content, store):
     # Content comes from feeds/web pages: sanitize first, then filter the killfile phrases
     artikel_content = sanitize_html(artikel_content)
     killfile = load_killfile()
@@ -271,6 +297,9 @@ def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     message["Subject"] = artikel_titel
     message["From"] = sender_email
     message["To"] = receiver_email
+    # with SMTP the server added these, APPEND stores the message as it is
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid()
 
     plain_content = html_to_text(artikel_content)
     laengetext = len(plain_content.split())
@@ -295,65 +324,13 @@ def create_email(artikel_url, artikel_titel, artikel_content, mailbox):
     message.attach(part1)
     message.attach(part2)
 
-    # Add header and send email
-    message["X-Special-Header"] = mailbox
-    context = ssl.create_default_context()
-    try:
-        with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
-            server.starttls(context=context)
-            server.login(sender_email, password)
-            server.sendmail(sender_email, receiver_email, message.as_string())
-    except (smtplib.SMTPException, OSError) as e:
-        raise MailSendError(f"Mail could not be sent: {e}") from e
-
-def mailsort(header):
-    time.sleep(10) #ist hier, damit die Mails Zeit haben anzukommen 
-    with MailBox(imapHost).login(imapUser, imapPasscode, initial_folder='INBOX') as mailbox:
-    # nur mails mit special header suchen
-        emails_with_special_header = mailbox.fetch(A(header=[H("X-Special-Header" , value=header)]), charset='utf-8', bulk=True, mark_seen=False)
-
-        # IMAP HEADER search matches substrings ("News" also finds "News-Tech"), so compare exactly
-        for email in emails_with_special_header:
-            if header in (value.strip() for value in email.headers.get("x-special-header", ())):
-                mailbox.move(email.uid, header)
-
-def mailchecker(Eingangsordner):
-    #öffne Filterliste
-    file_path = os.path.join(script_directory , "/app/data/filter.txt")
-    filter = []
-    with open(file_path, "r", encoding="utf-8") as file:
-        for line in file:
-            # an empty keyword would match every subject
-            if line.strip():
-                filter.append(line.strip())
-    
-    filterlower = [element.lower() for element in filter]
-
-    with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
-          #hier ist der ort, um in die abfrage auch noch den Check nach Mailheader aufzunehmen, damit nur RSS-Mails gefiltert werden  
-        for nachricht in mailbox.fetch(OR(subject=filter), charset='utf-8', bulk=True, mark_seen=False):
-            betreff = nachricht.subject
-            betreff = betreff.lower()
-
-            if(any(element in betreff for element in filterlower)):
-                for element in filterlower:
-                    if element in betreff:
-                        print("Matched element:", element)
-  
-                
-                mailbox.move(nachricht.uid, filterfolder)
+    # archive-sort.py moves read articles back to this folder
+    message["X-Special-Header"] = store.folder
+    store.store(message, artikel_titel)
 
 def open_seen_db():
     """Open the database of mailed URLs, importing an old urls.tsv on first use."""
-    db = sqlite3.connect(db_file_path)
-    db.execute("""CREATE TABLE IF NOT EXISTS seen_urls (
-        url TEXT PRIMARY KEY,
-        feed TEXT,
-        seen_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-    db.execute("""CREATE TABLE IF NOT EXISTS feed_errors (
-        feed TEXT PRIMARY KEY,
-        failing_since TEXT,
-        last_mailed TEXT)""")
+    db = feeddb.open_db()
     if os.path.exists(legacy_tsv_path):
         with open(legacy_tsv_path, newline="", encoding="utf-8") as file:
             urls = [row['URL'] for row in csv.DictReader(file, delimiter='\t') if row.get('URL')]
@@ -363,8 +340,35 @@ def open_seen_db():
         print(f"Imported {len(urls)} URLs from {legacy_tsv_path}")
     return db
 
-def is_seen(db, url):
-    return db.execute("SELECT 1 FROM seen_urls WHERE url = ?", (url,)).fetchone() is not None
+# Tracking parameters that don't change the article
+TRACKING_PARAMS = re.compile(r"^(?:utm_.*|fbclid|gclid|dclid|msclkid|mc_cid|mc_eid|wt_mc|wt_zmc)$", re.I)
+
+def normalize_url(url):
+    """The URL without tracking parameters and fragment, so the same article linked with
+    different utm_* parameters is recognized."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return url
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in params if not TRACKING_PARAMS.match(k)]
+    # rebuild the query only if needed, urlencode may change the encoding
+    query = urlencode(kept) if len(kept) != len(params) else parts.query
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
+
+def seen_keys(entry, feed_url):
+    """Keys under which an entry is remembered in seen_urls: the normalized link and the
+    entry's id/GUID (scoped to the feed, since GUIDs are only unique within a feed)."""
+    keys = [normalize_url(entry.link)]
+    if entry.get('id'):
+        keys.append(f"guid:{feed_url}:{entry.id}")
+    return keys
+
+def is_seen(db, entry, feed_url):
+    # the raw link too: older versions stored it unnormalized
+    keys = seen_keys(entry, feed_url) + [entry.link]
+    placeholders = ",".join("?" * len(keys))
+    return db.execute(f"SELECT 1 FROM seen_urls WHERE url IN ({placeholders})", keys).fetchone() is not None
 
 def new_entries(feed, db, feed_url):
     """Return the feed entries that haven't been mailed yet.
@@ -374,21 +378,26 @@ def new_entries(feed, db, feed_url):
     subscribing to a feed with a long history doesn't send its whole archive.
     """
     entries = [entry for entry in feed.entries if entry.get('link')]
-    fresh = [entry for entry in entries if not is_seen(db, entry.link)]
+    fresh = [entry for entry in entries if not is_seen(db, entry, feed_url)]
     if len(fresh) == len(entries) and len(entries) > FIRST_RUN_ITEMS:
         print(f"First run of feed with {len(entries)} entries, mailing only the newest {FIRST_RUN_ITEMS}")
         # Feeds are sorted newest first; if not, sort by date where available
         if all(entry.get('published_parsed') for entry in entries):
             entries.sort(key=lambda entry: entry.published_parsed, reverse=True)
-        mark_seen(db, feed_url, [entry.link for entry in entries[FIRST_RUN_ITEMS:]])
+        mark_seen(db, feed_url, entries[FIRST_RUN_ITEMS:])
         fresh = entries[:FIRST_RUN_ITEMS]
-    return fresh
+    # the same article twice in the feed (e.g. with different tracking parameters)
+    unique = {}
+    for entry in fresh:
+        unique.setdefault(normalize_url(entry.link), entry)
+    return list(unique.values())
 
-def mark_seen(db, feed_url, urls):
-    """Remember urls as mailed and commit right away, so an error later in the run doesn't resend them."""
+def mark_seen(db, feed_url, entries, sent=False):
+    """Remember entries as handled and commit right away, so an error later in the run doesn't
+    resend them. sent: whether they were actually mailed (for the status page)."""
     with db:
-        db.executemany("INSERT OR IGNORE INTO seen_urls (url, feed) VALUES (?, ?)",
-                       [(url, feed_url) for url in urls])
+        db.executemany("INSERT OR IGNORE INTO seen_urls (url, feed, sent) VALUES (?, ?, ?)",
+                       [(key, feed_url, int(sent)) for entry in entries for key in seen_keys(entry, feed_url)])
 
 def fetch_feed(url):
     """Download and parse a feed; raise if it can't be fetched or parsed."""
@@ -414,7 +423,7 @@ def process_entries(feed, url, db, send_entry):
             send_entry(entry)
         except FeedTimeout:
             # the article that hangs would otherwise time out the feed on every run
-            mark_seen(db, url, [entry.link])
+            mark_seen(db, url, [entry])
             raise FeedTimeout(f"Feed took longer than {FEED_TIMEOUT} seconds, stopped at article {entry.link}")
         except MailSendError:
             # not the article's fault: keep it unseen so it is sent on the next run
@@ -422,7 +431,9 @@ def process_entries(feed, url, db, send_entry):
         except Exception as e:
             print(f"Error in entry {entry.link}: {e}")
             failed.append((entry.link, traceback.format_exc()))
-        mark_seen(db, url, [entry.link])
+            mark_seen(db, url, [entry])
+            continue
+        mark_seen(db, url, [entry], sent=True)
     return failed
 
 MAX_REDIRECT_PAGES = 3  # max. interstitial "you are being redirected" pages to follow
@@ -473,7 +484,7 @@ def fetch_article(url):
         html, url = download_page(target)
     return html, url
 
-def full_text2(url, mailbox, db):
+def full_text2(url, store, db):
     def send_entry(entry):
         text_trafilatura, article_url = fetch_article(entry.link)
         h = trafilatura.extract(text_trafilatura, include_comments=False, include_links=True, include_formatting=True)
@@ -481,14 +492,14 @@ def full_text2(url, mailbox, db):
         if h is not None:
             artikel_content = markdown.markdown(h)  # Convert to Markdown
             artikel_content = preprocess_links(artikel_content)  # Preprocess links
-            create_email(article_url, title, artikel_content, mailbox)
+            create_email(article_url, title, artikel_content, store)
         else:
             print(f"Content extraction failed for {article_url}")
-            create_email(article_url, title, "Content could not be extracted.", mailbox)
+            create_email(article_url, title, "Content could not be extracted.", store)
 
     return process_entries(fetch_feed(url), url, db, send_entry)
 
-def read_rss_feed(url, mailbox, db):
+def read_rss_feed(url, store, db):
     def send_entry(entry):
         content = "kein Content in Feed"
         if entry.get('content') and hasattr(entry.content[0], 'value'):
@@ -503,27 +514,16 @@ def read_rss_feed(url, mailbox, db):
 
         content = preprocess_links(content)  # Preprocess links
         title = entry.get('title', entry.link)
-        create_email(entry.link, title, content, mailbox)
+        create_email(entry.link, title, content, store)
 
     return process_entries(fetch_feed(url), url, db, send_entry)
 
 def errormailer(textexception, subject="Fehler bei Skriptausführung"):
     message = MIMEMultipart("alternative")
     message["Subject"] = subject
-    message["From"] = sender_email
-    message["To"] = receiver_email
-    text = textexception
-    html = f"<pre>{html_lib.escape(textexception)}</pre>"
-    part1 = MIMEText(text, "plain")
-    part2 = MIMEText(html, "html")
-    message.attach(part1)
-    message.attach(part2)
-#absenden mail
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, port, timeout=REQUEST_TIMEOUT) as server:
-        server.starttls(context=context)
-        server.login(sender_email, password)
-        server.sendmail(sender_email, receiver_email, message.as_string())
+    message.attach(MIMEText(textexception, "plain"))
+    message.attach(MIMEText(f"<pre>{html_lib.escape(textexception)}</pre>", "html"))
+    common.send_mail(config['SMTP'], message)
 
 
 
@@ -532,13 +532,13 @@ def process_feed(section_dict, db):
     if section_dict.get('active') == "False":
         return []
     print(section_dict['imap-mailbox'])
-    if section_dict.get('fulltext') == "True":
-        failed = full_text2(section_dict['url'], section_dict['imap-mailbox'], db)
-    else:
-        failed = read_rss_feed(section_dict['url'], section_dict['imap-mailbox'], db)
-    mailsort(section_dict['imap-mailbox'])
-    mailchecker(section_dict['imap-mailbox'])
-    return failed
+    store = ArticleStore(section_dict['imap-mailbox'])
+    try:
+        if section_dict.get('fulltext') == "True":
+            return full_text2(section_dict['url'], store, db)
+        return read_rss_feed(section_dict['url'], store, db)
+    finally:
+        store.close()
 
 def feed_error_due(db, section, feed_failed):
     """Remember whether the feed itself failed in this run and return whether its error should
@@ -549,7 +549,8 @@ def feed_error_due(db, section, feed_failed):
         if not feed_failed:
             if row and row[0]:
                 print(f"Feed {section} works again")
-                db.execute("UPDATE feed_errors SET failing_since = NULL WHERE feed = ?", (section,))
+                # a new failure is reported right away, not ERROR_MAIL_INTERVAL after the old one
+                db.execute("UPDATE feed_errors SET failing_since = NULL, last_mailed = NULL WHERE feed = ?", (section,))
             return False, None
         if not row:
             db.execute("INSERT INTO feed_errors (feed) VALUES (?)", (section,))
@@ -600,6 +601,9 @@ def main():
         # errors of the feed itself would repeat every run, so they are throttled
         article_errors = [(link, error) for link, error in errors if link]
         feed_errors = [(link, error) for link, error in errors if not link]
+        if section_dict.get('active') != "False":
+            # the last line of the traceback, the exception itself, is enough for the status page
+            feeddb.record_run(db, section, "\n".join((error.strip().splitlines() or ["?"])[-1] for _, error in feed_errors) or None)
         due, failing_since = feed_error_due(db, section, bool(feed_errors))
         if not due:
             if feed_errors:
@@ -620,7 +624,18 @@ def main():
             print(f"Error mail could not be sent: {e}\n{body}")
     print("Fertig")
         
+LOCK_PATH = common.data_path("nsm.lock")
+
 if __name__ == "__main__":
+    common.setup_logging("nsm")
+    # Only one run at a time (cron and the web interface may start one). A second run
+    # would mail the same new articles again, so it just stops.
+    lock = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("nsm.py is already running, skipping this run")
+        sys.exit(0)
     try:
         main()
     except Exception as e:

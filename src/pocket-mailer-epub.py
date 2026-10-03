@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
@@ -16,28 +15,16 @@ from datetime import datetime, timezone
 from html import escape
 from PIL import Image, ImageDraw, ImageFont
 from mailtext import html_to_text, paragraphs
-import configparser
-
-# Global values
-script_directory = os.path.dirname(os.path.abspath(__file__))
+import common
 
 # E-Mail Configuration
-config = configparser.ConfigParser()
-configpath = os.path.join(script_directory, "/app/data/config.cfg")
-config.read(configpath)
-mail_dict = dict(config)
-
-imapHost = mail_dict['IMAP']['imapHost']
-imapUser = mail_dict['IMAP']['imapUser']
-imapPasscode = mail_dict['IMAP']['imapPasscode']
-Eingangsordner = mail_dict['Mailings']['unread_folder']
-
-# SMTP Configuration
-port = mail_dict['SMTP']['port']
-smtp_server = mail_dict['SMTP']['smtp_server']
-sender_email = mail_dict['SMTP']['sender_email']
-receiver_email = mail_dict['SMTP']['receiver_email']
-password = mail_dict['SMTP']['password']
+config = common.load_config()
+imapHost = config['IMAP']['imapHost']
+imapUser = config['IMAP']['imapUser']
+imapPasscode = config['IMAP']['imapPasscode']
+Eingangsordner = config['Mailings']['unread_folder']
+smtp_config = config['SMTP']
+receiver_email = smtp_config['receiver_email']
 
 # EPUB Settings
 dateiname = "Leseliste.epub"
@@ -342,8 +329,6 @@ def sendeanhang(to, subject, body, filename):
     """Send an email with the EPUB file as an attachment."""
     # Create the email message
     message = MIMEMultipart()
-    message['From'] = sender_email
-    message['To'] = receiver_email
     message['Subject'] = subject
 
     # Attach the EPUB file
@@ -355,11 +340,7 @@ def sendeanhang(to, subject, body, filename):
         message.attach(obj)
 
     # Send the email
-    email_session = smtplib.SMTP(smtp_server, port)
-    email_session.starttls()
-    email_session.login(sender_email, password)
-    email_session.sendmail(sender_email, receiver_email, message.as_string())
-    email_session.quit()
+    common.send_mail(smtp_config, message)
     print("YOUR MAIL HAS BEEN SENT SUCCESSFULLY")
 
 def mail_to_chapter(nachricht):
@@ -370,14 +351,14 @@ def mail_to_chapter(nachricht):
     if nachricht.html:
         try:
             emailinhalt = html_to_text(nachricht.html)
-            print(f"Extracted HTML content: {emailinhalt}")  # Debug: Log HTML content
+            print(f"HTML: {nachricht.subject} ({len(emailinhalt.split())} Wörter)")
         except Exception as e:
             print(f"Error processing HTML content: {e}")
 
     # Fallback to plain text if HTML is empty or fails
     if not emailinhalt and nachricht.text:
         emailinhalt = nachricht.text.strip()
-        print(f"Fallback to plain text content: {emailinhalt}")  # Debug: Log plain text content
+        print(f"Text: {nachricht.subject} ({len(emailinhalt.split())} Wörter)")
 
     # Skip emails with no content
     if not emailinhalt:
@@ -390,49 +371,56 @@ def mail_to_chapter(nachricht):
 # Folders that are never part of "all folders": not selectable or not reading material
 SKIPPED_FOLDER_FLAGS = {"\\noselect", "\\nonexistent", "\\trash", "\\junk", "\\sent", "\\drafts"}
 
-parser = argparse.ArgumentParser(description="Build an EPUB from the mails in the read-later folder (or other folders).")
-parser.add_argument("--no-mail", action="store_true", help="only create the file, don't send it (used for downloads)")
-parser.add_argument("--folder", action="append", default=[],
-                    help="IMAP folder to include, may be repeated; the book gets one chapter per folder")
-parser.add_argument("--all-folders", action="store_true", help="include all folders of the mailbox, one chapter each")
-parser.add_argument("--unread", action="store_true", help="only include unread mails (and don't mark them read)")
-args = parser.parse_args()
+def main():
+    common.setup_logging("pocket-mailer-epub")
+    parser = argparse.ArgumentParser(description="Build an EPUB from the mails in the read-later folder (or other folders).")
+    parser.add_argument("--no-mail", action="store_true", help="only create the file, don't send it (used for downloads)")
+    parser.add_argument("--folder", action="append", default=[],
+                        help="IMAP folder to include, may be repeated; the book gets one chapter per folder")
+    parser.add_argument("--all-folders", action="store_true", help="include all folders of the mailbox, one chapter each")
+    parser.add_argument("--unread", action="store_true", help="only include unread mails (and don't mark them read)")
+    args = parser.parse_args()
 
-# Process emails and add content to the EPUB
-if args.folder or args.all_folders:
-    # One chapter per folder with the mails as sub-chapters. This is a look into the mailbox,
-    # so it must not change the read state of the mails.
-    buchtitel = "Ungelesen" if args.unread else buchtitel
-    criteria = AND(seen=False) if args.unread else AND(all=True)
-    groups = []
-    with MailBox(imapHost).login(imapUser, imapPasscode, initial_folder=None) as mailbox:
-        if args.all_folders:
-            folders = [f.name for f in mailbox.folder.list()
-                       if not SKIPPED_FOLDER_FLAGS & {flag.lower() for flag in f.flags}]
-        else:
-            folders = list(dict.fromkeys(args.folder))  # drop duplicates, keep order
-        for folder in folders:
-            mailbox.folder.set(folder)
-            chapters = [chapter for nachricht in mailbox.fetch(criteria, mark_seen=False, bulk=True)
-                        if (chapter := mail_to_chapter(nachricht))]
-            if chapters:
-                groups.append((folder, chapters))
-    empty_text = "Keine ungelesenen Mails gefunden." if args.unread else "In den gewählten Ordnern sind keine Mails."
-else:
-    # Default: the read-later folder as a flat list of articles
-    with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
-        chapters = [chapter for nachricht in mailbox.fetch(bulk=True) if (chapter := mail_to_chapter(nachricht))]
-    groups = [(None, chapters)] if chapters else []
-    empty_text = "In der Leseliste sind aktuell keine Artikel."
+    # Process emails and add content to the EPUB
+    book_title = buchtitel
+    if args.folder or args.all_folders:
+        # One chapter per folder with the mails as sub-chapters. This is a look into the mailbox,
+        # so it must not change the read state of the mails.
+        book_title = "Ungelesen" if args.unread else buchtitel
+        criteria = AND(seen=False) if args.unread else AND(all=True)
+        groups = []
+        with MailBox(imapHost).login(imapUser, imapPasscode, initial_folder=None) as mailbox:
+            if args.all_folders:
+                folders = [f.name for f in mailbox.folder.list()
+                           if not SKIPPED_FOLDER_FLAGS & {flag.lower() for flag in f.flags}]
+            else:
+                folders = list(dict.fromkeys(args.folder))  # drop duplicates, keep order
+            for folder in folders:
+                mailbox.folder.set(folder)
+                chapters = [chapter for nachricht in mailbox.fetch(criteria, mark_seen=False, bulk=True)
+                            if (chapter := mail_to_chapter(nachricht))]
+                if chapters:
+                    groups.append((folder, chapters))
+        empty_text = "Keine ungelesenen Mails gefunden." if args.unread else "In den gewählten Ordnern sind keine Mails."
+    else:
+        # Default: the read-later folder as a flat list of articles
+        with MailBox(imapHost).login(imapUser, imapPasscode, Eingangsordner) as mailbox:
+            chapters = [chapter for nachricht in mailbox.fetch(mark_seen=False, bulk=True) if (chapter := mail_to_chapter(nachricht))]
+        groups = [(None, chapters)] if chapters else []
+        empty_text = "In der Leseliste sind aktuell keine Artikel."
 
-# An empty table of contents is invalid EPUB, so add a placeholder chapter
-if not groups:
-    groups = [(None, [("Keine Artikel", f"<p>{xml_text(empty_text)}</p>")])]
+    # An empty table of contents is invalid EPUB, so add a placeholder chapter
+    if not groups:
+        groups = [(None, [("Keine Artikel", f"<p>{xml_text(empty_text)}</p>")])]
 
-# Create the EPUB file
-write_epub(dateiname, groups, buchtitel)
+    # Create the EPUB file
+    write_epub(dateiname, groups, book_title)
 
-# Send the EPUB file as an email attachment (--no-mail: only create the file, used for downloads)
-if not args.no_mail:
-    sendeanhang(receiver_email, "Export", "This is an automatic export of your read-later folder from Nachrichtensortiermaschine", dateiname)
-print("done")
+    # Send the EPUB file as an email attachment (--no-mail: only create the file, used for downloads)
+    if not args.no_mail:
+        sendeanhang(receiver_email, "Export", "This is an automatic export of your read-later folder from Nachrichtensortiermaschine", dateiname)
+    print("done")
+
+
+if __name__ == "__main__":
+    main()
