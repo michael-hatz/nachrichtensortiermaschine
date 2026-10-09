@@ -403,6 +403,9 @@ def fetch_feed(url):
     """Download and parse a feed; raise if it can't be fetched or parsed."""
     #diese Nutzung von Feedparser ist, weil einige Seiten den Feedparser direkt blocken, bzw. requests ohne header
     response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT)
+    if response.status_code in (403, 419, 429):
+        # andere Seiten (z.B. news.ycombinator.com, 419 "Sorry") sperren gerade den Browser-User-Agent, lassen Feedreader aber durch
+        response = requests.get(url, headers={'User-Agent': 'nsm-feedreader/1.0'}, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     feed = feedparser.parse(response.content)
     if feed.bozo and not feed.entries:
