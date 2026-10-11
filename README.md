@@ -33,17 +33,17 @@ Then, visit **127.0.0.1:5000** (or your custom IP) to access the management inte
 - **Read-Later Folder**: Move articles into a special folder and get them compiled as an **ePub** (for your eBook reader) or a **text file**.  
 
 ## Additional Tips & Customization  
-- ** Use a separate mail account**: Nachrichtensortiermaschine shouldn't delete anything, but it's cleaner to keep it separate from your main inbox.  
-- ** Read-Later requires a dedicated mailbox**: You'll need a separate email address for storing articles (e.g., an *Artikelpostfach*). If you don’t have one, consider running a second Docker container with a mail server or set up filtering to direct mails into a specific subfolder.  
-- ** Bookmarklet available!** In the GitHub repository, you’ll find a bookmarklet—save it to your bookmarks bar to send the current webpage to your Read-Later folder in one click.  
-- ** Mobile-friendly**: Use "Share to → Mail app" on mobile devices to send articles.  
-- ** Feeds update every hour by default**: You can modify this using `crontab -e` to adjust the cron job for `nsm.py`. Be mindful of server load.  
-- ** Adjust Read-Later sync frequency**: You can configure how often `pocket-ersatz.py` checks for new emails.  
-- ** Set digest delivery times**: Customize when and how often you receive a summary of your Read-Later folder.  
-- ** Filtering**: By default, filtering checks if the keyword appears in the email subject or article headline. If you prefer, you can modify `nsm.py` to search the full email text, though this may cause excessive blocking.  
-- ** Works well with newsletters & mailing lists**: It’s not just for RSS feeds! Subscribe to newsletters for an even richer experience.  
-- ** No Docker? No problem!** Nachrichtensortiermaschine runs on plain Python. Feel free to use the files as-is and deploy them however you like.  
-- ** Fork it, modify it, build on it!** You’re free to edit the code, repurpose it, or integrate it into your own projects. If you create something cool, let me know—I might "steal" your features back! 😉  
+- **Use a separate mail account**: Nachrichtensortiermaschine shouldn't delete anything, but it's cleaner to keep it separate from your main inbox.  
+- **Read-Later requires a dedicated mailbox**: You'll need a separate email address for storing articles (e.g., an *Artikelpostfach*). If you don’t have one, consider running a second Docker container with a mail server or set up filtering to direct mails into a specific subfolder.  
+- **Bookmarklet available!** In the GitHub repository, you’ll find a bookmarklet—save it to your bookmarks bar to send the current webpage to your Read-Later folder in one click.  
+- **Mobile-friendly**: Use "Share to → Mail app" on mobile devices to send articles.  
+- **Feeds update every hour by default**: You can modify this using `crontab -e` to adjust the cron job for `nsm.py`. Be mindful of server load.  
+- **Adjust Read-Later sync frequency**: You can configure how often `pocket-ersatz.py` checks for new emails.  
+- **Set digest delivery times**: Customize when and how often you receive a summary of your Read-Later folder.  
+- **Filtering**: By default, filtering checks if the keyword appears in the email subject or article headline. If you prefer, you can modify `nsm.py` to search the full email text, though this may cause excessive blocking.  
+- **Works well with newsletters & mailing lists**: It’s not just for RSS feeds! Subscribe to newsletters for an even richer experience.  
+- **No Docker? No problem!** Nachrichtensortiermaschine runs on plain Python. Feel free to use the files as-is and deploy them however you like.  
+- **Fork it, modify it, build on it!** You’re free to edit the code, repurpose it, or integrate it into your own projects. If you create something cool, let me know—I might "steal" your features back! 😉  
 
 ## Why Use It?  
 -  Read news using your favorite email program on any device.  
