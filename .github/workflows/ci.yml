@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      EPUBCHECK_VERSION: 5.4.0
+      EPUBCHECK_SHA256: 33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c
+    steps:
+      - uses: actions/checkout@v5
+
+      # The tests run inside the image, so they see the same Python packages and /app layout
+      - name: Build image
+        run: docker build -t nsm -f dockerfile .
+
+      - name: Run tests
+        run: |
+          mkdir -p out
+          docker run --rm -v "$PWD/tests:/tests:ro" -v "$PWD/out:/out" -e EPUB_OUT=/out/test.epub nsm \
+            sh -c "pip install -q pytest && cd /tests && python3 -m pytest -p no:cacheprovider"
+
+      - name: Check Firefox and geckodriver work together
+        run: |
+          docker run --rm nsm python3 -c "
+          from selenium import webdriver
+          from selenium.webdriver.firefox.options import Options
+          options = Options()
+          options.add_argument('--headless')
+          options.binary_location = '/usr/local/bin/firefox'
+          driver = webdriver.Firefox(options=options, service=webdriver.FirefoxService(executable_path='/usr/local/bin/geckodriver'))
+          driver.install_addon('/app/istilldontcareaboutcookies-1.1.4.xpi')
+          driver.install_addon('/app/bypass-paywalls-firefox.xpi')
+          print('Firefox', driver.capabilities['browserVersion'])
+          driver.quit()
+          "
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Validate EPUB with epubcheck
+        run: |
+          curl -fsSL -o epubcheck.zip "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip"
+          echo "${EPUBCHECK_SHA256}  epubcheck.zip" | sha256sum -c -
+          unzip -q epubcheck.zip
+          java -jar "epubcheck-${EPUBCHECK_VERSION}/epubcheck.jar" --failonwarnings out/test.epub

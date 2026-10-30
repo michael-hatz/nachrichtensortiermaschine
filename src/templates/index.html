@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Nachrichtensortiermaschine</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f5fbf'/%3E%3Cpath d='M8 11h16M8 16h16M8 21h10' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+    <style>
+        /* ---------- Design tokens ---------- */
+        :root {
+            --bg: #f3f5f8;
+            --surface: #ffffff;
+            --surface-2: #f7f9fb;
+            --border: #e1e5eb;
+            --border-strong: #c9d0da;
+            --text: #1d2530;
+            --muted: #6a7482;
+            --accent: #1f5fbf;
+            --accent-hover: #194f9f;
+            --accent-soft: #e8f0fb;
+            --accent-soft-hover: #d6e4f7;
+            --on-accent: #ffffff;
+            --danger: #c0262d;
+            --danger-soft: #fcebec;
+            --success: #1e7b3c;
+            --success-soft: #e6f4ea;
+            --warn: #a15c00;
+            --warn-soft: #fff4e0;
+            --focus: 0 0 0 3px rgba(31, 95, 191, .28);
+            --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+            --shadow: 0 1px 3px rgba(16, 24, 40, .08), 0 4px 16px rgba(16, 24, 40, .06);
+            --radius: 10px;
+            --radius-sm: 6px;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #12161c;
+                --surface: #1a1f27;
+                --surface-2: #20262f;
+                --border: #2c333d;
+                --border-strong: #3b4450;
+                --text: #e4e8ee;
+                --muted: #939cab;
+                --accent: #5b9bf0;
+                --accent-hover: #7cafF3;
+                --accent-soft: #1f2e45;
+                --accent-soft-hover: #273a57;
+                --on-accent: #0d1522;
+                --danger: #f07178;
+                --danger-soft: #3a2024;
+                --success: #6fcf8e;
+                --success-soft: #1b3325;
+                --warn: #f0b35b;
+                --warn-soft: #3a2e1a;
+                --focus: 0 0 0 3px rgba(91, 155, 240, .35);
+                --shadow-sm: none;
+                --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+            }
+        }
+
+        /* ---------- Base ---------- */
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.5;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+        a { color: var(--accent); }
+        h2 { font-size: 1.3rem; font-weight: 650; letter-spacing: -.01em; }
+        h3 { font-size: 1.05rem; font-weight: 650; margin: 1.8em 0 .5em; }
+        h4 { font-size: .95rem; font-weight: 600; margin: 1.2em 0 .3em; }
+        input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; vertical-align: middle; cursor: pointer; }
+        [hidden] { display: none !important; }
+
+        /* ---------- Header & tabs ---------- */
+        .site-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .container { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+        .brand { display: flex; align-items: center; gap: 12px; padding: 16px 0 10px; }
+        .brand-mark {
+            width: 36px; height: 36px; border-radius: 9px; flex: none;
+            background: var(--accent); color: var(--on-accent);
+            display: grid; place-items: center;
+        }
+        .brand h1 { font-size: 1.15rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+        .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+        .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 0 -8px; }
+        .tabs::-webkit-scrollbar { display: none; }
+        .tab {
+            appearance: none; background: none; border: none; margin: 0;
+            padding: 10px 12px 12px; font: inherit; font-size: 14px; font-weight: 500;
+            color: var(--muted); cursor: pointer; white-space: nowrap;
+            border-bottom: 2px solid transparent; border-radius: 0;
+            transition: color .15s, border-color .15s;
+        }
+        .tab:hover { color: var(--text); background: none; }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: none; }
+        .tab:focus-visible { outline: none; box-shadow: inset var(--focus); border-radius: var(--radius-sm); }
+
+        /* ---------- Panels ---------- */
+        main.container { padding-top: 24px; padding-bottom: 24px; }
+        .tab-content {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            padding: 22px 24px 26px;
+        }
+        .tab-content.active { display: block; animation: fade-in .18s ease-out; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+        .tab-header {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; flex-wrap: wrap;
+            padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--border);
+        }
+        .tab-header h2 { margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .filename {
+            font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--muted);
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
+        }
+        .raw-toggle { font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 8px; }
+        .raw-toggle:hover { color: var(--text); }
+
+        /* ---------- Form controls ---------- */
+        textarea, input[type="text"], input[type="password"], input[type="url"], input[type="search"] {
+            font: inherit;
+            color: var(--text);
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            transition: border-color .15s, box-shadow .15s;
+        }
+        textarea:focus, input[type="text"]:focus, input[type="password"]:focus, input[type="url"]:focus, input[type="search"]:focus {
+            outline: none; border-color: var(--accent); box-shadow: var(--focus);
+        }
+        textarea {
+            width: 100%;
+            height: 420px;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 12px 14px;
+            resize: vertical;
+            background: var(--surface-2);
+            tab-size: 4;
+        }
+
+        /* ---------- Buttons ---------- */
+        button, .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            font: inherit; font-size: 14px; font-weight: 550; line-height: 1.2;
+            background: var(--accent); color: var(--on-accent);
+            border: 1px solid transparent; border-radius: var(--radius-sm);
+            padding: 8px 16px; margin: 0; cursor: pointer; white-space: nowrap;
+            transition: background-color .15s, color .15s, box-shadow .15s, opacity .15s;
+        }
+        button:hover, .btn:hover { background: var(--accent-hover); }
+        button:focus-visible, .btn:focus-visible, .btn:focus-within { outline: none; box-shadow: var(--focus); }
+        button:disabled { opacity: .6; cursor: progress; }
+        button.secondary, .btn.secondary { background: var(--accent-soft); color: var(--accent); }
+        button.secondary:hover, .btn.secondary:hover { background: var(--accent-soft-hover); }
+        button.ghost { background: transparent; color: var(--muted); border-color: var(--border-strong); }
+        button.ghost:hover { background: var(--surface-2); color: var(--text); }
+        button.danger { background: transparent; color: var(--muted); padding: 6px 9px; }
+        button.danger:hover { background: var(--danger-soft); color: var(--danger); }
+        button.busy::before {
+            content: ""; width: 13px; height: 13px; border-radius: 50%;
+            border: 2px solid currentColor; border-right-color: transparent;
+            animation: spin .7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ---------- Editor GUI (feeds, config, filter, killfile) ---------- */
+        .gui input[type="text"], .gui input[type="password"], .gui input[type="url"], .gui input[type="search"] {
+            width: 100%; padding: 7px 10px; font-size: 14px;
+        }
+        .gui .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 75ch; }
+        .tab-content > .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 75ch; }
+        .gui .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+        .gui .toolbar input[type="search"], .gui .toolbar input[type="text"] { flex: 1; min-width: 180px; width: auto; }
+        .gui .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+        .gui input[type="search"] {
+            padding-left: 34px;
+            background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238a93a0' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px center;
+        }
+
+        /* Feeds */
+        .feed-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+        .feed-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .feed-table th {
+            text-align: left; color: var(--muted); font-size: 12px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: .04em;
+            padding: 9px 8px; background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap;
+        }
+        .feed-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .feed-table tbody tr:last-child td { border-bottom: none; }
+        .feed-table tbody tr:hover { background: var(--surface-2); }
+        .feed-table td.center, .feed-table th.center { text-align: center; }
+        .feed-table col.c-name { width: 20%; }
+        .feed-table col.c-url { width: 45%; }
+        .feed-table col.c-folder { width: 20%; }
+        /* table inputs look like plain text until hovered or focused */
+        .gui .feed-table input[type="text"], .gui .feed-table input[type="url"] {
+            min-width: 120px; border-color: transparent; background: transparent; padding: 6px 8px;
+        }
+        .gui .feed-table tr:hover input[type="text"], .gui .feed-table tr:hover input[type="url"] { border-color: var(--border-strong); background: var(--surface); }
+        .gui .feed-table input:focus { border-color: var(--accent) !important; background: var(--surface) !important; }
+        .feed-table td:nth-child(3) input { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+        .feed-table tr.paused td input[type="text"], .feed-table tr.paused td input[type="url"] { color: var(--muted); opacity: .6; text-decoration: line-through; text-decoration-color: var(--border-strong); }
+        .empty-row td { text-align: center; color: var(--muted); padding: 28px; }
+        .add-feed {
+            background: var(--accent-soft); border: 1px solid var(--accent-soft-hover);
+            border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+        }
+        .add-feed .grid { display: grid; grid-template-columns: 1fr 2fr 1fr auto auto; gap: 10px; align-items: end; }
+        .add-feed label { font-size: 12.5px; font-weight: 550; color: var(--muted); display: block; margin-bottom: 4px; }
+        .add-feed .check { height: 36px; display: flex; align-items: center; justify-content: center; }
+        .add-feed .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+        .add-feed .error:empty { display: none; }
+
+        /* Toggle switch */
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; vertical-align: middle; flex: none; }
+        .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .switch span { position: absolute; inset: 0; background: var(--border-strong); border-radius: 20px; transition: .2s; cursor: pointer; }
+        .switch span::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+        .switch input:checked + span { background: var(--success); }
+        .switch input:checked + span::before { transform: translateX(14px); }
+        .switch input:focus-visible + span { box-shadow: var(--focus); }
+        .raw-toggle .switch input:checked + span { background: var(--accent); }
+
+        /* Config */
+        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px; align-items: start; }
+        .config-section {
+            border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 0 16px 12px; margin: 0; min-width: 0; background: var(--surface);
+        }
+        .config-section legend {
+            float: left; width: calc(100% + 32px); margin: 0 -16px 12px;
+            padding: 10px 16px; font-weight: 650; font-size: 14px;
+            background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0;
+        }
+        .config-section legend + * { clear: both; }
+        .config-section .hint { margin-bottom: 10px; }
+        .config-row { display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: center; margin: 8px 0; }
+        .config-row label { font-size: 13.5px; color: var(--muted); word-break: break-word; }
+        .secret { display: flex; gap: 6px; }
+        .secret button { min-width: 64px; }
+
+        /* Filter chips */
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+        .chip {
+            display: inline-flex; align-items: center; gap: 2px;
+            background: var(--accent-soft); color: var(--accent);
+            border: 1px solid var(--accent-soft-hover); border-radius: 999px;
+            padding: 3px 3px 3px 12px; font-size: 14px; font-weight: 500;
+        }
+        .chip button { background: transparent; color: inherit; padding: 0; width: 22px; height: 22px; font-size: 16px; border-radius: 50%; }
+        .chip button:hover { background: var(--accent-soft-hover); }
+
+        /* Killfile */
+        .phrase { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+        .gui .phrase textarea { height: auto; min-height: 60px; background: var(--surface); font-family: inherit; font-size: 14px; }
+
+        /* ---------- Actions ---------- */
+        .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+        .action-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+        .action-card h3 { margin: 0; }
+        .action-card > p { margin: -6px 0 0; color: var(--muted); font-size: 13.5px; }
+        .action-list { display: flex; flex-direction: column; gap: 8px; }
+        .action-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
+        .action-item > div:first-child { flex: 1 1 150px; min-width: 0; }
+        .action-item span { font-size: 13.5px; color: var(--muted); }
+        .readlater-add input { flex: 1 1 180px; min-width: 0; }
+        .readlater-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+        .readlater-list:empty { display: none; }
+        .readlater-list li { display: flex; gap: 10px; align-items: baseline; padding: 4px 2px; }
+        .readlater-list a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+        .readlater-list .state { flex: none; color: var(--muted); font-size: 12.5px; }
+        .readlater-list .state.failed { color: var(--danger); }
+        .action-item strong { display: block; color: var(--text); font-weight: 600; font-size: 14px; }
+        .file-pick { position: relative; overflow: hidden; }
+        .file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        /* ---------- EPUB folder picker ---------- */
+        dialog.picker {
+            width: calc(100% - 32px); max-width: 480px; padding: 0;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+        }
+        dialog.picker::backdrop { background: rgba(10, 14, 20, .45); }
+        .picker-head, .picker-foot { padding: 16px 18px; }
+        .picker-head h3 { margin: 0 0 4px; }
+        .picker-head p { margin: 0; font-size: 13.5px; color: var(--muted); }
+        .picker-tools { display: flex; gap: 6px; margin-top: 12px; }
+        .picker-tools button { padding: 5px 10px; font-size: 13px; }
+        .picker-list { max-height: min(50vh, 420px); overflow-y: auto; border-block: 1px solid var(--border); padding: 6px 0; }
+        .picker-list label { display: flex; align-items: center; gap: 10px; padding: 7px 18px; font-size: 14px; cursor: pointer; word-break: break-word; }
+        .picker-list label:hover { background: var(--surface-2); }
+        .picker-list .empty { padding: 14px 18px; color: var(--muted); font-size: 14px; }
+        .picker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .picker-foot label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-right: auto; cursor: pointer; }
+        /* ---------- Setup wizard ---------- */
+        dialog.wizard { max-width: 560px; }
+        .wizard .picker-head { display: flex; align-items: flex-start; gap: 12px; }
+        .wizard .picker-head > div { flex: 1; }
+        .wizard .skip { background: none; color: var(--muted); padding: 2px 4px; font-size: 13px; text-decoration: underline; }
+        .wizard .skip:hover { background: none; color: var(--text); }
+        .wz-steps { display: flex; gap: 6px; list-style: none; margin: 12px 0 0; padding: 0; flex-wrap: wrap; }
+        .wz-steps li { font-size: 12.5px; color: var(--muted); padding: 2px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+        .wz-steps li.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-soft-hover); font-weight: 600; }
+        .wz-steps li.done { color: var(--success); }
+        .wz-body { border-top: 1px solid var(--border); padding: 16px 18px; max-height: min(62vh, 560px); overflow-y: auto; }
+        .wz-body > p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted); }
+        .wz-field { margin-bottom: 12px; }
+        .wz-field > label { display: block; font-size: 13px; font-weight: 550; color: var(--muted); margin-bottom: 4px; }
+        .wz-field input[type="text"], .wz-field input[type="password"], .wz-field input[type="email"], .wz-field input[type="number"] {
+            width: 100%; padding: 7px 10px; font: inherit; font-size: 14px; color: var(--text);
+            background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+        }
+        .wz-field input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+        .wz-field small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+        .wz-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+        .wz-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0 12px; cursor: pointer; }
+        .wz-note { font-size: 13px; background: var(--warn-soft); border-left: 3px solid var(--warn); border-radius: var(--radius-sm); padding: 8px 12px; margin: 0 0 14px; }
+        .wz-status { font-size: 13.5px; border-radius: var(--radius-sm); padding: 8px 12px; margin: 0 18px 14px; word-break: break-word; }
+        .wz-status:empty { display: none; }
+        .wz-status.error { background: var(--danger-soft); color: var(--danger); }
+        .wz-status.ok { background: var(--success-soft); color: var(--success); }
+        .wizard .picker-foot { border-top: 1px solid var(--border); }
+        .wizard .picker-foot .spacer { margin-right: auto; }
+        @media (max-width: 700px) { .wz-row { grid-template-columns: 1fr 90px; } }
+        .file-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* ---------- Logs ---------- */
+        .log-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+        .log-controls select { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); max-width: 100%; }
+        .log-view {
+            font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 12px 14px; margin: 0; height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+        }
+
+        /* ---------- Jobs and status ---------- */
+        .job-panel { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+        .job-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .job-head button { margin-left: auto; }
+        .job-state { font-size: 13px; color: var(--muted); }
+        .job-state.ok { color: var(--success); }
+        .job-state.failed { color: var(--danger); }
+        .job-log { height: 40vh; }
+        .status-table td { padding: 9px 8px; white-space: nowrap; }
+        .status-table td:first-child { white-space: normal; font-weight: 550; }
+        .status-table td.num, .status-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .status-table .url { display: block; font-weight: 400; font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+        .pill { display: inline-block; font-size: 12.5px; font-weight: 550; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+        .pill.ok { background: var(--success-soft); color: var(--success); }
+        .pill.failed { background: var(--danger-soft); color: var(--danger); cursor: help; }
+        .status-table .since { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .feed-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; font-size: 13px; }
+        .url-detect { display: flex; gap: 6px; }
+        .url-detect input { flex: 1; min-width: 0; }
+
+        /* ---------- FAQ ---------- */
+        .prose { max-width: 76ch; }
+        .prose p, .prose li { color: var(--text); }
+        .prose h3:first-child { margin-top: 0; }
+        .prose code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+        .prose pre {
+            font-family: var(--mono); font-size: 13px; line-height: 1.6;
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 14px 16px; overflow-x: auto; white-space: pre-wrap;
+        }
+        .note {
+            background: var(--warn-soft); border-left: 3px solid var(--warn);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            padding: 12px 16px; margin: 14px 0; font-size: 14px;
+        }
+        .note strong { color: var(--warn); }
+        .timings { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+        .timings div { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; }
+        .timings code { display: block; border: none; background: none; padding: 0; margin-bottom: 4px; font-weight: 600; color: var(--accent); }
+        .timings span { color: var(--muted); font-size: 13px; }
+
+        /* ---------- Save bar ---------- */
+        .savebar {
+            position: sticky; bottom: 0; z-index: 5;
+            background: color-mix(in srgb, var(--bg) 85%, transparent);
+            backdrop-filter: blur(8px);
+            border-top: 1px solid var(--border);
+        }
+        .savebar .container { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding-top: 10px; padding-bottom: 10px; }
+        .save-state { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+        .save-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
+        .save-state[data-state="dirty"] { color: var(--warn); font-weight: 550; }
+        .save-state[data-state="dirty"]::before { background: var(--warn); }
+        .save-state[data-state="saved"] { color: var(--success); }
+        .save-state[data-state="saved"]::before { background: var(--success); }
+        .save-state[data-state="error"] { color: var(--danger); }
+        .save-state[data-state="error"]::before { background: var(--danger); }
+        .kbd { font-family: var(--mono); font-size: 11px; opacity: .75; font-weight: 500; }
+
+        /* ---------- Toasts ---------- */
+        .toasts { position: fixed; right: 20px; bottom: 76px; z-index: 50; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 32px)); }
+        .toast {
+            display: flex; align-items: flex-start; gap: 10px;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-left: 4px solid var(--success);
+            border-radius: var(--radius-sm); box-shadow: var(--shadow);
+            padding: 11px 12px 11px 14px; font-size: 14px;
+            animation: toast-in .2s ease-out; white-space: pre-wrap; word-break: break-word;
+        }
+        .toast.error { border-left-color: var(--danger); }
+        .toast.info { border-left-color: var(--accent); }
+        .toast .msg { flex: 1; }
+        .toast button { background: none; color: var(--muted); padding: 0 4px; font-size: 16px; line-height: 1; }
+        .toast button:hover { background: none; color: var(--text); }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+        /* ---------- Footer ---------- */
+        footer { text-align: center; padding: 8px 0 28px; font-size: 13px; color: var(--muted); }
+        footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--border-strong); }
+        footer a:hover { color: var(--accent); border-color: var(--accent); }
+
+        @media (max-width: 700px) {
+            .container { padding: 0 16px; }
+            .brand p { display: none; }
+            .tab-content { padding: 16px; }
+            .add-feed .grid { grid-template-columns: 1fr; }
+            .add-feed .check { justify-content: flex-start; height: auto; }
+            .config-grid { grid-template-columns: 1fr; }
+            .config-row { grid-template-columns: 1fr; gap: 3px; }
+            .save-state { margin-right: auto; }
+            .kbd { display: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <div class="brand">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+                </div>
+                <div>
+                    <h1>Nachrichtensortiermaschine</h1>
+                    <p>RSS feeds and read-later articles, delivered to your mailbox</p>
+                </div>
+            </div>
+            <nav class="tabs" role="tablist">
+                <button type="button" class="tab active" data-tab="config">Settings</button>
+                <button type="button" class="tab" data-tab="feeds">Feeds</button>
+                <button type="button" class="tab" data-tab="filter">Filter</button>
+                <button type="button" class="tab" data-tab="killfile">Killfile</button>
+                <button type="button" class="tab" data-tab="crontab">Crontab</button>
+                <button type="button" class="tab" data-tab="actions">Actions</button>
+                <button type="button" class="tab" data-tab="status">Status</button>
+                <button type="button" class="tab" data-tab="logs">Logs</button>
+                <button type="button" class="tab" data-tab="FAQ">FAQ</button>
+            </nav>
+        </div>
+    </header>
+
+    <form action="/" method="POST">
+        <main class="container">
+        <div id="config" class="tab-content active">
+            <div class="tab-header">
+                <h2>Settings <span class="filename">config.cfg</span></h2>
+                <button type="button" class="secondary" onclick="openWizard()">Setup wizard</button>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="config"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="config-gui"></div>
+            <textarea name="config" hidden spellcheck="false">{{ config }}</textarea>
+        </div>
+        <div id="feeds" class="tab-content">
+            <div class="tab-header">
+                <h2>Feeds <span class="filename">feeds.cfg</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="feeds"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="feeds-gui"></div>
+            <textarea name="feeds" hidden spellcheck="false">{{ feeds }}</textarea>
+        </div>
+        <div id="filter" class="tab-content">
+            <div class="tab-header">
+                <h2>Filter <span class="filename">filter.txt</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="filter"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="filter-gui"></div>
+            <textarea name="filter" hidden spellcheck="false">{{ filter }}</textarea>
+        </div>
+        <div id="killfile" class="tab-content">
+            <div class="tab-header">
+                <h2>Killfile <span class="filename">killfile.txt</span></h2>
+                <label class="raw-toggle"><span class="switch"><input type="checkbox" data-raw="killfile"><span></span></span> Edit as text</label>
+            </div>
+            <div class="gui" id="killfile-gui"></div>
+            <textarea name="killfile" hidden spellcheck="false">{{ killfile }}</textarea>
+        </div>
+        <div id="crontab" class="tab-content">
+            <div class="tab-header">
+                <h2>Crontab <span class="filename">/etc/cron.d/myjobs</span></h2>
+            </div>
+            <p class="hint">Only schedules for the scripts in <code>/app</code> (as user <code>nsm</code>) and the maintenance jobs (as <code>root</code>) are accepted, e.g. <code>58 * * * * nsm /opt/venv/bin/python3 /app/nsm.py</code>.</p>
+            <textarea name="crontab" spellcheck="false">{{ crontab }}</textarea>
+        </div>
+        <div id="actions" class="tab-content">
+            <div class="tab-header">
+                <h2>Actions</h2>
+            </div>
+            <div class="action-grid">
+                <section class="action-card">
+                    <h3>Run now</h3>
+                    <p>Start a job right away instead of waiting for the crontab.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Fetch feeds</strong><span>Deliver new articles to your mailbox</span></div>
+                            <button type="button" data-job="fetch-feeds" onclick="runJob('fetch-feeds')">Run</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Send TXT</strong><span>Mail the read-later folder as text</span></div>
+                            <button type="button" data-job="send-txt" onclick="runJob('send-txt')">Send</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Send EPUB</strong><span>Mail the read-later folder as ePub</span></div>
+                            <button type="button" data-job="send-epub" onclick="runJob('send-epub')">Send</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="action-card">
+                    <h3>Read later</h3>
+                    <p>Save a page without writing a mail. Firefox fetches the full text and mails it to you.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Bookmarklet</strong><span>Drag the button to your bookmarks toolbar, then click it on any article</span></div>
+                            <a class="btn secondary" href="{{ bookmarklet }}" title="Drag me to the bookmarks toolbar" onclick="event.preventDefault(); toast('Drag this button to your bookmarks toolbar.')">Read later</a>
+                        </div>
+                        <div class="action-item readlater-add">
+                            <input type="url" id="readlater-url" placeholder="https://… paste a link" aria-label="Link to save">
+                            <button type="button" id="readlater-save" onclick="saveReadLater(this)">Save</button>
+                        </div>
+                    </div>
+                    <ul class="readlater-list" id="readlater-list" aria-live="polite"></ul>
+                </section>
+                <section class="action-card">
+                    <h3>Download</h3>
+                    <p>Build your reading list and save it here instead of mailing it.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Reading list as TXT</strong><span>Plain text</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-txt', this)">Download</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Reading list as EPUB</strong><span>For e-readers</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-epub', this)">Download</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>Folders as EPUB</strong><span>Pick folders, one chapter each</span></div>
+                            <button type="button" class="secondary" id="epub-folders-open" onclick="openFolderPicker()">Choose…</button>
+                        </div>
+                        <div class="action-item">
+                            <div><strong>All unread mails as EPUB</strong><span>Whole mailbox, one chapter per folder</span></div>
+                            <button type="button" class="secondary" onclick="downloadFile('download-epub?all=1&unread=1', this)">Download</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="action-card">
+                    <h3>OPML</h3>
+                    <p>Move your feed list to or from another feed reader.</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <div><strong>Export</strong><span>Download feeds.cfg as OPML</span></div>
+                            <button type="button" class="secondary" onclick="window.location.href='/export-opml'">Export</button>
+                        </div>
+                        <div class="action-item" id="opml-upload">
+                            <div><strong>Import</strong><span class="file-name" id="opml-file-name">Add feeds from an OPML file</span></div>
+                            <div style="display: flex; gap: 6px">
+                                <label class="btn secondary file-pick">Choose…<input type="file" id="opml-file" accept=".opml,.xml"></label>
+                                <button type="button" id="opml-import" onclick="uploadOpml(this)" disabled>Import</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <section class="job-panel" id="job-panel" hidden>
+                <div class="job-head">
+                    <strong id="job-title"></strong>
+                    <span class="job-state" id="job-state"></span>
+                    <button type="button" class="ghost" onclick="closeJob()">Close</button>
+                </div>
+                <pre class="log-view job-log" id="job-log" aria-live="polite"></pre>
+            </section>
+        </div>
+        <div id="status" class="tab-content">
+            <div class="tab-header">
+                <h2>Status</h2>
+                <button type="button" class="secondary" onclick="loadStatus(this)">Reload</button>
+            </div>
+            <p class="hint">Updated by every feed run. "Sent" counts the articles mailed since this page exists; links from before are in "known".</p>
+            <div class="feed-table-wrap">
+                <table class="feed-table status-table">
+                    <thead><tr>
+                        <th>Feed</th><th>State</th><th>Last successful fetch</th><th>Last article</th>
+                        <th class="num">Sent (30 days)</th><th class="num">Sent</th><th class="num">Known</th>
+                    </tr></thead>
+                    <tbody id="status-body"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="logs" class="tab-content">
+            <div class="tab-header">
+                <h2>Logs <span class="filename" id="log-file">/app/data/logs/</span></h2>
+                <div class="log-controls">
+                    <select id="log-name" aria-label="Log">
+                        <option value="nsm">Fetch feeds (nsm.py)</option>
+                        <option value="pocket-ersatz">Read later (pocket-ersatz.py)</option>
+                        <option value="archive-sort">Archive sort (archive-sort.py)</option>
+                        <option value="pocket-mailer">TXT export (pocket-mailer.py)</option>
+                        <option value="pocket-mailer-epub">EPUB export (pocket-mailer-epub.py)</option>
+                    </select>
+                    <button type="button" class="secondary" onclick="loadLog(this)">Reload</button>
+                </div>
+            </div>
+            <p class="hint">Output of the scripts, newest at the bottom. The files are rotated at 1 MB.</p>
+            <pre class="log-view" id="log-view"></pre>
+        </div>
+        <div id="FAQ" class="tab-content">
+            <div class="tab-header">
+                <h2>FAQ</h2>
+            </div>
+            <div class="prose">
+    <h3>Configuration</h3>
+    <p>Please configure your mail settings in the Settings tab.</p>
+
+    <h3>Read later without mail</h3>
+    <p>In the Actions tab, drag the <strong>Read later</strong> button to your bookmarks toolbar. Clicking it on an article saves the page: a small popup confirms it and closes again. Firefox then fetches the full text right away and mails it like a link sent to the Artikelpostfach. The bookmarklet contains its own key, so it works without logging in. It only allows saving links. If you change the web password, drag the button to your toolbar again. A link that fails is retried on the next runs, up to three times; the list in the Actions tab shows its state.</p>
+
+    <h3>Login</h3>
+    <p>The web interface asks for a login (user <code>admin</code>). Set the password with the environment variable <code>NSM_WEB_PASSWORD</code> (and optionally the user with <code>NSM_WEB_USER</code>). Without it, a random password is generated on the first start, stored in <code>web-password.txt</code> in the data volume and printed to the container log. The login is sent unencrypted over plain HTTP, so put a reverse proxy with HTTPS in front if the interface is reachable from outside your network.</p>
+
+    <div class="note">
+        <strong>Recommendation:</strong> I recommend using a separate mail account for this program. If you're trying to integrate news, order confirmations, private communication, and so on into one INBOX, it will end in chaos.
+    </div>
+
+    <p>If you're using Gmail (which you shouldn't) with 2FA, you have to set an app password.</p>
+
+    <p><strong>Regarding the Artikelpostfach-Configuration:</strong> This is for the integrated Pocket/Instapaper/Readlater-Functionality. Send a link to the mail you've configured in <code>[imap-Artikelpostfach]</code> and Nachrichtensortiermaschine will fetch the full text and send it with the SMTP-Server to the address configured in <code>[smtp-Artikelpostfach]</code>.</p>
+
+    <p>I'm using a second mail address here because this allows me to send articles from several mail addresses without figuring out where and how to separate them from other mails.</p>
+
+    <div class="note">
+        <strong>Note:</strong> Pocket-Ersatz.py will scan every mail here for links and open a Firefox with BypassPaywall &amp; I still don't care about cookies in the background to fetch the articles. You may want to configure a whitelist of allowed senders to prevent spam from being processed.
+        You also need to configure a folder called "Archiv" in the root of your mailbox.
+    </div>
+
+    <h3>Feeds</h3>
+    <p>Put in feeds in this configuration:</p>
+
+    <pre>[feed.name]
+url = URL of the feed
+fulltext = True/False
+If False, Nachrichtensortiermaschine takes the text included in the RSS feed
+Use "True" for truncated feeds. Nachrichtensortiermaschine will load the linked article and give you the full text. Please be aware: This won't work if the full text is behind a paywall or if the site in question uses some enhanced bot protection
+
+active = True/False
+If you want to pause / stop the feed, set to False
+
+imap-mailbox = INBOX
+You can deliver your mails to subfolders, which I highly recommend. Just create the INBOX/CustomFolder in your mail program and set this to INBOX/CustomFolder
+
+Filterfolder:
+the mail folder where you want to move your filtered mails
+
+backup_to_archiveorg:
+Currently not functional</pre>
+
+    <h3>Filter</h3>
+    <p>Put in keywords here (one per line) and if the keyword is included in an article's title, the article is put into the folder you've configured in configuration → Filterfolder instead of its feed folder.</p>
+
+    <h4>How does this work?</h4>
+    <ul>
+        <li>Put in e.g. <strong>Trump</strong> in the filter.</li>
+        <li>It only searches in the subject of the mail, so if Trump is mentioned there, it gets moved. If Trump is mentioned somewhere in the body of the mail, it is not moved.</li>
+        <li>If you want to change that, you can change it in nsm.py.</li>
+        <li>Please be careful with filtering: If you filter <strong>"AI"</strong>, you may also filter out <strong>"Malaysia"</strong>.</li>
+    </ul>
+
+    <h3>Timings</h3>
+    <div class="timings">
+        <div><code>nsm.py</code>The main engine that fetches your feeds<br><span>Runs once an hour by default</span></div>
+        <div><code>pocket-ersatz.py</code>Fetches your read-later articles<br><span>Runs once an hour by default</span></div>
+        <div><code>pocket-mailer.py</code>Sends everything in your read-later folder as text<br><span>Runs daily at 07:30</span></div>
+        <div><code>pocket-mailer-epub.py</code>Sends everything in your read-later folder as ePub<br><span>Doesn't run by default</span></div>
+    </div>
+
+    <h3>Nachrichtensortiermaschine plays nicely along your newsletters</h3>
+    <p>Get some news via RSS and subscribe to other insightful texts from your favourite authors via their newsletter. We are living in a golden age of newsletters, so feel free to mix things up!</p>
+
+    <h3>Social Features</h3>
+    <p>Everybody has a mail address. Simply forward the mail with the article to whoever you want to read it. Feel free to add a comment.</p>
+            </div>
+        </div>
+        </main>
+
+        <div class="savebar">
+            <div class="container">
+                <span class="save-state" id="save-state" data-state="clean" role="status">No unsaved changes</span>
+                <button type="submit" id="save-button">Save changes <span class="kbd">Ctrl+S</span></button>
+            </div>
+        </div>
+    </form>
+
+    <footer>
+        Nachrichtensortiermaschine · <a href="https://github.com/michael-hatz/nachrichtensortiermaschine" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+
+    <dialog class="picker wizard" id="wizard" aria-labelledby="wizard-title">
+        <div class="picker-head">
+            <div>
+                <h3 id="wizard-title">Set up your mail account</h3>
+                <ol class="wz-steps" id="wz-steps">
+                    <li>Mailbox</li><li>Sending</li><li>Folders</li><li>Read-later</li>
+                </ol>
+            </div>
+            <button type="button" class="skip" onclick="closeWizard()">Set up later</button>
+        </div>
+
+        <div class="wz-body" data-step="0">
+            <p>Nachrichtensortiermaschine delivers your feed articles as mails. Which mailbox should they go to?</p>
+            <div class="wz-field"><label for="wz-email">Email address</label>
+                <input type="email" id="wz-email" autocomplete="off" placeholder="you@example.org"></div>
+            <div class="wz-field"><label for="wz-password">Password</label>
+                <input type="password" id="wz-password" autocomplete="new-password">
+                <small>Some providers (e.g. Gmail) need an app password here.</small></div>
+            <div class="wz-field"><label for="wz-imap-host">IMAP server</label>
+                <input type="text" id="wz-imap-host" data-auto="imap" autocomplete="off">
+                <small>Connected via SSL on port 993.</small></div>
+            <div class="wz-field"><label for="wz-imap-user">Login</label>
+                <input type="text" id="wz-imap-user" data-auto="email" autocomplete="off"></div>
+        </div>
+
+        <div class="wz-body" data-step="1" hidden>
+            <p>Articles are sent to you by mail. How should they be sent?</p>
+            <div class="wz-row">
+                <div class="wz-field"><label for="wz-smtp-host">SMTP server</label>
+                    <input type="text" id="wz-smtp-host" data-auto="smtp" autocomplete="off"></div>
+                <div class="wz-field"><label for="wz-smtp-port">Port</label>
+                    <input type="number" id="wz-smtp-port" value="587" min="1" max="65535"></div>
+            </div>
+            <div class="wz-field"><label for="wz-smtp-user">Login / sender address</label>
+                <input type="text" id="wz-smtp-user" data-auto="email" autocomplete="off">
+                <small>Connected with STARTTLS (usually port 587).</small></div>
+            <label class="wz-check"><input type="checkbox" id="wz-same-password" checked> Same password as the mailbox</label>
+            <div class="wz-field" id="wz-smtp-password-field" hidden><label for="wz-smtp-password">SMTP password</label>
+                <input type="password" id="wz-smtp-password" autocomplete="new-password"></div>
+            <div class="wz-field"><label for="wz-receiver">Deliver articles to</label>
+                <input type="email" id="wz-receiver" data-auto="email" autocomplete="off">
+                <small>Usually the mailbox from step 1, so the articles can be sorted into its folders.</small></div>
+        </div>
+
+        <div class="wz-body" data-step="2" hidden>
+            <p>Two folders in your mailbox. Missing folders are created when you save.</p>
+            <div class="wz-field"><label for="wz-unread">Read-later folder</label>
+                <input type="text" id="wz-unread" list="wz-folder-list" autocomplete="off">
+                <small>The TXT and EPUB reading lists are built from this folder.</small></div>
+            <div class="wz-field"><label for="wz-filter">Folder for filtered mails</label>
+                <input type="text" id="wz-filter" list="wz-folder-list" autocomplete="off">
+                <small>Articles matching your filter are moved here, e.g. the trash.</small></div>
+            <datalist id="wz-folder-list"></datalist>
+        </div>
+
+        <div class="wz-body" data-step="3" hidden>
+            <p>Optional: a separate address you forward links to. Every link in its inbox is fetched as a full article and sent to you.</p>
+            <label class="wz-check"><input type="checkbox" id="wz-readlater"> Set up a read-later mailbox</label>
+            <div id="wz-readlater-fields" hidden>
+                <p class="wz-note">Use a dedicated address, not your main mailbox: every mail in its inbox is processed and moved to the folder “Archiv”.</p>
+                <div class="wz-field"><label for="wz-rl-email">Email address / login</label>
+                    <input type="email" id="wz-rl-email" autocomplete="off"></div>
+                <div class="wz-field"><label for="wz-rl-password">Password</label>
+                    <input type="password" id="wz-rl-password" autocomplete="new-password"></div>
+                <div class="wz-field"><label for="wz-rl-imap-host">IMAP server</label>
+                    <input type="text" id="wz-rl-imap-host" data-auto="rl-imap" autocomplete="off"></div>
+                <div class="wz-row">
+                    <div class="wz-field"><label for="wz-rl-smtp-host">SMTP server</label>
+                        <input type="text" id="wz-rl-smtp-host" data-auto="rl-smtp" autocomplete="off"></div>
+                    <div class="wz-field"><label for="wz-rl-smtp-port">Port</label>
+                        <input type="number" id="wz-rl-smtp-port" value="587" min="1" max="65535"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="wz-status" id="wz-status" role="status"></div>
+        <div class="picker-foot">
+            <button type="button" class="ghost" id="wz-back">Back</button>
+            <span class="spacer"></span>
+            <button type="button" class="ghost" id="wz-anyway" hidden>Continue anyway</button>
+            <button type="button" id="wz-next">Next</button>
+        </div>
+    </dialog>
+
+    <dialog class="picker" id="epub-folders" aria-labelledby="epub-folders-title">
+        <div class="picker-head">
+            <h3 id="epub-folders-title">Folders as EPUB</h3>
+            <p>Each folder becomes a chapter with its mails as sub-chapters. Mails aren't marked as read.</p>
+            <div class="picker-tools">
+                <button type="button" class="ghost" onclick="selectAllFolders(true)">Select all</button>
+                <button type="button" class="ghost" onclick="selectAllFolders(false)">Select none</button>
+            </div>
+        </div>
+        <div class="picker-list" id="epub-folder-list"><div class="empty">Loading folders…</div></div>
+        <div class="picker-foot">
+            <label><input type="checkbox" id="epub-unread-only"> Only unread mails</label>
+            <button type="button" class="ghost" onclick="document.getElementById('epub-folders').close()">Cancel</button>
+            <button type="button" id="epub-folders-download" onclick="downloadFolders()" disabled>Download</button>
+        </div>
+    </dialog>
+
+    <script>
+        // ---------- CSRF ----------
+        // Every request that changes something must carry the token, or the server rejects it
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (resource, options = {}) => {
+            const method = (options.method || 'GET').toUpperCase();
+            if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                options = { ...options, headers: new Headers(options.headers || {}) };
+                options.headers.set('X-CSRF-Token', CSRF_TOKEN);
+            }
+            return nativeFetch(resource, options);
+        };
+
+        // ---------- Tabs ----------
+        const TABS = [...document.querySelectorAll('.tab')].map(tab => tab.dataset.tab);
+        function showTab(tabName) {
+            if (!TABS.includes(tabName)) tabName = TABS[0];
+            document.querySelectorAll('.tab').forEach(tab => {
+                const active = tab.dataset.tab === tabName;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', active);
+            });
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.toggle('active', content.id === tabName));
+            history.replaceState(null, '', '#/' + tabName);  // '#/' so the browser doesn't jump to the element
+        }
+        document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
+
+        // ---------- Logs ----------
+        function loadLog(button) {
+            const name = document.getElementById('log-name').value;
+            const view = document.getElementById('log-view');
+            document.getElementById('log-file').textContent = `/app/data/logs/${name}.log`;
+            if (button) setBusy(button, true);
+            fetch(`/api/logs/${encodeURIComponent(name)}`)
+                .then(response => response.text().then(text => {
+                    if (!response.ok) throw new Error(text);
+                    view.textContent = text;
+                    view.scrollTop = view.scrollHeight;
+                }))
+                .catch(error => toast('Error: ' + error.message, 'error'))
+                .finally(() => { if (button) setBusy(button, false); });
+        }
+        document.getElementById('log-name').addEventListener('change', () => loadLog());
+        document.querySelector('.tab[data-tab="logs"]').addEventListener('click', () => loadLog());
+        showTab(location.hash.replace(/^#\/?/, ''));
+        if (location.hash === '#/logs') loadLog();
+
+        // ---------- Toasts ----------
+        function toast(message, type = 'success') {
+            const box = document.createElement('div');
+            box.className = `toast ${type}`;
+            box.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            const msg = document.createElement('div');
+            msg.className = 'msg';
+            msg.textContent = message;
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.textContent = '×';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.onclick = () => box.remove();
+            box.append(msg, close);
+            document.getElementById('toasts').append(box);
+            setTimeout(() => box.remove(), type === 'error' ? 10000 : 4000);
+        }
+
+        function setBusy(button, busy) {
+            button.disabled = busy;
+            button.classList.toggle('busy', busy);
+        }
+
+        // ---------- Background jobs with live log ----------
+        let jobTimer = null;
+        let jobName = null;
+
+        function jobButton(name) {
+            return document.querySelector(`[data-job="${name}"]`);
+        }
+
+        function runJob(name) {
+            fetch(`/api/jobs/${name}`, { method: 'POST' })
+                .then(response => response.json().then(data => {
+                    if (!response.ok) throw new Error(data.error || response.statusText);
+                    if (data.already_running) toast(`${data.label} is already running.`);
+                    followJob(name);
+                }))
+                .catch(error => toast('Error: ' + error.message, 'error'));
+        }
+
+        function followJob(name, announce = true) {
+            clearTimeout(jobTimer);
+            if (jobName && jobName !== name) setBusy(jobButton(jobName), false);
+            jobName = name;
+            const panel = document.getElementById('job-panel');
+            const log = document.getElementById('job-log');
+            const state = document.getElementById('job-state');
+            panel.hidden = false;
+            log.textContent = '';
+            setBusy(jobButton(name), true);
+            let since = 0;
+            const poll = () => fetch(`/api/jobs/${name}?since=${since}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (jobName !== name) return;
+                    document.getElementById('job-title').textContent = data.label;
+                    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+                    if (data.lines.length) log.append(data.lines.join('\n') + '\n');
+                    if (atBottom) log.scrollTop = log.scrollHeight;
+                    since = data.next;
+                    if (data.running) {
+                        state.className = 'job-state';
+                        state.textContent = `running since ${data.started}`;
+                        jobTimer = setTimeout(poll, 1000);
+                        return;
+                    }
+                    const ok = data.returncode === 0;
+                    state.className = 'job-state ' + (ok ? 'ok' : 'failed');
+                    state.textContent = ok ? `finished ${data.finished}` : `failed (exit code ${data.returncode}) ${data.finished}`;
+                    setBusy(jobButton(name), false);
+                    if (announce) toast(ok ? `${data.label} finished.` : `${data.label} failed, see the log.`, ok ? 'success' : 'error');
+                })
+                .catch(() => { jobTimer = setTimeout(poll, 3000); });
+            poll();
+            panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function closeJob() {
+            clearTimeout(jobTimer);
+            if (jobName) setBusy(jobButton(jobName), false);
+            jobName = null;
+            document.getElementById('job-panel').hidden = true;
+        }
+
+        // After a reload: show a job that is still running
+        fetch('/api/jobs').then(response => response.json()).then(jobs => {
+            const running = Object.values(jobs).find(job => job.running);
+            if (running) followJob(running.name);
+        }).catch(() => {});
+
+        // ---------- Feed status ----------
+        function loadStatus(button) {
+            if (button) setBusy(button, true);
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(feeds => {
+                    const body = document.getElementById('status-body');
+                    const cell = (content, cls) => el('td', cls ? { class: cls } : {}, content);
+                    body.replaceChildren(...feeds.map(f => {
+                        let pill;
+                        if (!f.active) pill = el('span', { class: 'pill' }, ['paused']);
+                        else if (f.last_error) pill = el('span', { class: 'pill failed', title: f.last_error }, ['failing']);
+                        else if (f.last_success) pill = el('span', { class: 'pill ok' }, ['OK']);
+                        else pill = el('span', { class: 'pill' }, ['not run yet']);
+                        const state = [pill];
+                        if (f.active && f.last_error && f.failing_since) state.push(el('span', { class: 'since' }, [`since ${f.failing_since}`]));
+                        return el('tr', {}, [
+                            cell([f.name, el('span', { class: 'url' }, [f.url])]),
+                            cell(state),
+                            cell([f.last_success || '–']),
+                            cell([f.last_article || '–']),
+                            cell([String(f.sent_30_days)], 'num'),
+                            cell([String(f.sent_total)], 'num'),
+                            cell([String(f.known)], 'num'),
+                        ]);
+                    }));
+                    if (!feeds.length) body.append(el('tr', { class: 'empty-row' }, [el('td', { colSpan: 7 }, ['No feeds configured.'])]));
+                })
+                .catch(error => toast('Error: ' + error.message, 'error'))
+                .finally(() => { if (button) setBusy(button, false); });
+        }
+        document.querySelector('.tab[data-tab="status"]').addEventListener('click', () => loadStatus());
+        if (location.hash === '#/status') loadStatus();
+
+        function downloadFile(action, button) {
+            setBusy(button, true);
+            fetch(`/${action}`)
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text); });
+                }
+                const disposition = response.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="?([^";]+)"?/);
+                return response.blob().then(blob => ({ blob, name: match ? match[1] : action }));
+            })
+            .then(({ blob, name }) => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(link.href);
+            })
+            .catch(error => toast(error.message, 'error'))
+            .finally(() => setBusy(button, false));
+        }
+
+        // ---------- Read later ----------
+        const STATE_LABELS = { queued: 'queued', retrying: 'retrying', sent: 'sent', failed: 'failed' };
+        let readLaterTimer = null;
+
+        function loadReadLater() {
+            fetch('/api/readlater')
+            .then(response => response.ok ? response.json() : [])
+            .then(items => {
+                const list = document.getElementById('readlater-list');
+                list.replaceChildren(...items.map(item => {
+                    const state = el('span', { class: 'state ' + item.state, title: item.error || item.added_at },
+                                     [STATE_LABELS[item.state] || item.state]);
+                    return el('li', {}, [el('a', { href: item.url, target: '_blank', rel: 'noopener', title: item.url },
+                                            [item.title || item.url]), state]);
+                }));
+                // refresh while articles are being fetched
+                clearTimeout(readLaterTimer);
+                if (items.some(item => item.state === 'queued' || item.state === 'retrying')) {
+                    readLaterTimer = setTimeout(loadReadLater, 10000);
+                }
+            })
+            .catch(() => {});
+        }
+        loadReadLater();
+
+        function saveReadLater(button) {
+            const input = document.getElementById('readlater-url');
+            if (!input.value.trim()) { input.focus(); return; }
+            setBusy(button, true);
+            fetch('/api/readlater', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: input.value.trim() }),
+            })
+            .then(response => response.json().then(result => {
+                toast(result.message, result.ok ? 'success' : 'error');
+                if (result.ok) input.value = '';
+                loadReadLater();
+            }))
+            .catch(error => toast('Error: ' + error, 'error'))
+            .finally(() => setBusy(button, false));
+        }
+        document.getElementById('readlater-url').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); saveReadLater(document.getElementById('readlater-save')); }
+        });
+
+        const opmlFile = document.getElementById('opml-file');
+        opmlFile.addEventListener('change', () => {
+            const file = opmlFile.files[0];
+            document.getElementById('opml-file-name').textContent = file ? file.name : 'Add feeds from an OPML file';
+            document.getElementById('opml-import').disabled = !file;
+        });
+
+        function uploadOpml(button) {
+            if (!opmlFile.files.length) return;
+            if (dirty && !confirm('Importing reloads the page and discards your unsaved changes. Continue?')) return;
+
+            const formData = new FormData();
+            formData.append('file', opmlFile.files[0]);
+
+            setBusy(button, true);
+            fetch('/import-opml', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data);
+                // feeds.cfg was rewritten on the server: reload so a later save can't overwrite it
+                try { sessionStorage.setItem('nsm-toast', data); } catch (e) {}
+                dirty = false;
+                location.reload();
+            })
+            .catch(error => {
+                toast(error.message, 'error');
+                setBusy(button, false);
+            });
+        }
+        try {
+            const pending = sessionStorage.getItem('nsm-toast');
+            if (pending) { sessionStorage.removeItem('nsm-toast'); toast(pending); }
+        } catch (e) {}
+
+        // ---------- Editor GUI ----------
+        // The textareas stay the source of truth: every GUI change is written back into
+        // its textarea, and "Save Changes" submits the textareas exactly as before.
+        let dirty = false;
+        const field = name => document.querySelector(`textarea[name="${name}"]`);
+
+        function el(tag, props = {}, children = []) {
+            const node = document.createElement(tag);
+            for (const [key, value] of Object.entries(props)) {
+                if (key === 'class') node.className = value;
+                else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+                else if (key === 'list' || key.startsWith('aria-') || !(key in node)) node.setAttribute(key, value);
+                else node[key] = value;
+            }
+            node.append(...children);
+            return node;
+        }
+
+        const saveState = document.getElementById('save-state');
+        function setSaveState(state, text) {
+            saveState.dataset.state = state;
+            saveState.textContent = text;
+        }
+
+        function markDirty() {
+            dirty = true;
+            setSaveState('dirty', 'Unsaved changes');
+        }
+
+        function setField(name, text) {
+            if (field(name).value !== text) {
+                field(name).value = text;
+                markDirty();
+            }
+        }
+
+        // Minimal INI reader matching what configparser accepts ("key = value" or "key: value")
+        function parseIni(text) {
+            const sections = [];
+            let current = null;
+            for (const line of text.split('\n')) {
+                const trimmed = line.trim();
+                const header = trimmed.match(/^\[(.+)\]$/);
+                if (header) {
+                    current = { name: header[1].trim(), entries: [] };
+                    sections.push(current);
+                } else if (current && trimmed && !trimmed.startsWith('#') && !trimmed.startsWith(';')) {
+                    const kv = line.match(/^\s*([^=:]+?)\s*[=:]\s*(.*?)\s*$/);
+                    if (kv) current.entries.push({ key: kv[1], value: kv[2] });
+                }
+            }
+            return sections;
+        }
+
+        // Change one value in place so comments and layout of the file are kept
+        function setIniValue(text, section, key, value) {
+            const lines = text.split('\n');
+            let inSection = false;
+            for (let i = 0; i < lines.length; i++) {
+                const header = lines[i].trim().match(/^\[(.+)\]$/);
+                if (header) {
+                    inSection = header[1].trim() === section;
+                    continue;
+                }
+                const kv = inSection && lines[i].match(/^(\s*)([^=:]+?)(\s*[=:]\s*)(.*?)\s*$/);
+                if (kv && kv[2].toLowerCase() === key.toLowerCase()) {
+                    lines[i] = kv[1] + kv[2] + kv[3] + value;
+                    break;
+                }
+            }
+            return lines.join('\n');
+        }
+
+        // --- Settings (config.cfg) ---
+        const CONFIG_SECTIONS = {
+            'IMAP': 'Mailbox your feed articles are delivered to.',
+            'IMAP-Artikelpostfach': 'Mailbox you send read-later links to.',
+            'Mailings': 'Read-later folder the TXT/EPUB exports are built from.',
+            'SMTP': 'Outgoing server for error reports and EPUB exports. Feed articles are stored directly via IMAP.',
+            'SMTP-Artikelpostfach': 'Outgoing server for read-later articles and TXT exports.',
+            'cronjobs': 'Not used. The schedule lives in the crontab tab.',
+        };
+        const CONFIG_LABELS = {
+            'imaphost': 'Server', 'imapuser': 'User', 'imappasscode': 'Password',
+            'eingangsordner': 'Inbox folder', 'unread_folder': 'Read-later folder',
+            'port': 'Port', 'smtp_server': 'Server', 'sender_email': 'Sender / login',
+            'receiver_email': 'Send to', 'password': 'Password',
+            'filterfolder': 'Folder for filtered mails', 'backup_to_archiveorg': 'Back up to archive.org',
+        };
+        const SECRET_KEY = /pass|key/i;
+        const FOLDER_KEYS = ['eingangsordner', 'unread_folder', 'filterfolder'];
+
+        function renderConfig() {
+            const gui = document.getElementById('config-gui');
+            const sections = parseIni(field('config').value);
+            gui.replaceChildren();
+            if (!sections.length) {
+                gui.append(el('p', { class: 'hint' }, ['config.cfg is empty. Use "Edit as text" to fill it in.']));
+                return;
+            }
+            const grid = el('div', { class: 'config-grid' });
+            gui.append(grid);
+            for (const section of sections) {
+                const box = el('fieldset', { class: 'config-section' }, [el('legend', {}, [section.name])]);
+                if (CONFIG_SECTIONS[section.name]) box.append(el('p', { class: 'hint' }, [CONFIG_SECTIONS[section.name]]));
+                for (const { key, value } of section.entries) {
+                    const id = `cfg-${section.name}-${key}`.replace(/[^\w-]/g, '_');
+                    const update = v => setField('config', setIniValue(field('config').value, section.name, key, v));
+                    let input;
+                    if (/^(true|false)$/i.test(value)) {
+                        input = el('input', { type: 'checkbox', id, checked: value.toLowerCase() === 'true',
+                                              onchange: e => update(e.target.checked ? 'True' : 'False') });
+                    } else if (SECRET_KEY.test(key)) {
+                        const secret = el('input', { type: 'password', id, value, autocomplete: 'off', oninput: e => update(e.target.value) });
+                        const toggle = el('button', { type: 'button', class: 'secondary', textContent: 'Show', onclick: () => {
+                            const show = secret.type === 'password';
+                            secret.type = show ? 'text' : 'password';
+                            toggle.textContent = show ? 'Hide' : 'Show';
+                        } });
+                        input = el('div', { class: 'secret' }, [secret, toggle]);
+                    } else {
+                        input = el('input', { type: 'text', id, value, oninput: e => update(e.target.value) });
+                        if (FOLDER_KEYS.includes(key.toLowerCase())) input.setAttribute('list', 'imap-folders');
+                    }
+                    const label = el('label', { htmlFor: id, title: key }, [CONFIG_LABELS[key.toLowerCase()] || key]);
+                    box.append(el('div', { class: 'config-row' }, [label, el('div', {}, [input])]));
+                }
+                grid.append(box);
+            }
+        }
+
+        // --- Feeds (feeds.cfg) ---
+        const FEED_KEYS = ['url', 'fulltext', 'active', 'imap-mailbox'];
+
+        function parseFeeds(text) {
+            return parseIni(text).map(section => {
+                const get = key => (section.entries.find(e => e.key.toLowerCase() === key) || {}).value;
+                return {
+                    name: section.name,
+                    url: get('url') || '',
+                    mailbox: get('imap-mailbox') || 'INBOX',
+                    // same rules as nsm.py: fulltext only if "True", active unless "False"
+                    fulltext: get('fulltext') === 'True',
+                    active: get('active') !== 'False',
+                    extra: section.entries.filter(e => !FEED_KEYS.includes(e.key.toLowerCase())),
+                };
+            });
+        }
+
+        function serializeFeeds(feeds) {
+            return feeds.map(f => [
+                `[${f.name}]`,
+                `url = ${f.url}`,
+                `fulltext = ${f.fulltext ? 'True' : 'False'}`,
+                `active = ${f.active ? 'True' : 'False'}`,
+                `imap-mailbox = ${f.mailbox}`,
+                ...f.extra.map(e => `${e.key} = ${e.value}`),
+            ].join('\n')).join('\n\n') + (feeds.length ? '\n' : '');
+        }
+
+        function renderFeeds() {
+            const gui = document.getElementById('feeds-gui');
+            const feeds = parseFeeds(field('feeds').value);
+            const rows = new Map();
+            const tbody = el('tbody');
+            const count = el('span', { class: 'count' });
+
+            const commit = () => {
+                setField('feeds', serializeFeeds(feeds));
+                const paused = feeds.filter(f => !f.active).length;
+                count.textContent = `${feeds.length} feed${feeds.length === 1 ? '' : 's'}` + (paused ? `, ${paused} paused` : '');
+            };
+
+            // Section names must be unique and must not contain brackets
+            const nameError = (name, self) => {
+                if (!name) return 'Please enter a name.';
+                if (/[\[\]]/.test(name)) return 'The name must not contain [ or ].';
+                if (feeds.some(f => f !== self && f.name.toLowerCase() === name.toLowerCase())) return 'A feed with this name already exists.';
+                return '';
+            };
+
+            function row(feed) {
+                const tr = el('tr', { class: feed.active ? '' : 'paused' });
+                const text = (prop, label, extra = {}) => el('input', { type: 'text', value: feed[prop], 'aria-label': label,
+                    oninput: e => { feed[prop] = e.target.value.trim(); commit(); }, ...extra });
+                const name = el('input', { type: 'text', value: feed.name, 'aria-label': 'Name', oninput: e => {
+                    const error = nameError(e.target.value.trim(), feed);
+                    e.target.setCustomValidity(error);
+                    if (error) { e.target.reportValidity(); return; }
+                    feed.name = e.target.value.trim();
+                    commit();
+                } });
+                const active = el('label', { class: 'switch', title: 'Active / paused' }, [
+                    el('input', { type: 'checkbox', checked: feed.active, 'aria-label': `Active: ${feed.name}`, onchange: e => {
+                        feed.active = e.target.checked;
+                        tr.className = feed.active ? '' : 'paused';
+                        commit();
+                    } }),
+                    el('span'),
+                ]);
+                const fulltext = el('input', { type: 'checkbox', checked: feed.fulltext, 'aria-label': 'Full text',
+                    title: 'Load the full article from the website (for truncated feeds)',
+                    onchange: e => { feed.fulltext = e.target.checked; commit(); } });
+                const remove = el('button', { type: 'button', class: 'danger', title: 'Delete feed', 'aria-label': 'Delete feed', textContent: '✕', onclick: () => {
+                    if (!confirm(`Delete feed "${feed.name}"?`)) return;
+                    feeds.splice(feeds.indexOf(feed), 1);
+                    rows.delete(feed);
+                    tr.remove();
+                    commit();
+                } });
+                tr.append(
+                    el('td', { class: 'center' }, [active]),
+                    el('td', {}, [name]),
+                    el('td', {}, [text('url', 'Feed URL', { type: 'url' })]),
+                    el('td', {}, [text('mailbox', 'Mail folder', { list: 'imap-folders' })]),
+                    el('td', { class: 'center' }, [fulltext]),
+                    el('td', { class: 'center' }, [remove]),
+                );
+                rows.set(feed, tr);
+                return tr;
+            }
+
+            const search = el('input', { type: 'search', placeholder: 'Search by name, URL or folder…', 'aria-label': 'Search feeds', oninput: applySearch });
+            function applySearch() {
+                const query = search.value.trim().toLowerCase();
+                for (const [feed, tr] of rows) {
+                    tr.hidden = query && ![feed.name, feed.url, feed.mailbox].some(v => v.toLowerCase().includes(query));
+                }
+            }
+
+            // "Add feed" form
+            const addName = el('input', { type: 'text', placeholder: 'e.g. tagesschau', id: 'add-feed-name' });
+            const addUrl = el('input', { type: 'url', placeholder: 'https://example.org or …/feed', id: 'add-feed-url' });
+            const addFolder = el('input', { type: 'text', value: 'INBOX', list: 'imap-folders', id: 'add-feed-folder' });
+            const addFulltext = el('input', { type: 'checkbox', id: 'add-feed-fulltext' });
+            const addError = el('div', { class: 'error', role: 'alert' });
+            const addFound = el('div', { class: 'feed-found', hidden: true });
+            function useFeed(found) {
+                addUrl.value = found.url;
+                if (!addName.value.trim() && found.title) addName.value = found.title.replace(/[\[\]]/g, '').trim();
+                addFound.hidden = true;
+            }
+            const detect = el('button', { type: 'button', class: 'secondary', textContent: 'Find feed',
+                title: 'Enter a website address and find its RSS/Atom feed', onclick: () => {
+                    if (!addUrl.value.trim()) { addError.textContent = 'Please enter a web address first.'; return; }
+                    addError.textContent = '';
+                    addFound.hidden = true;
+                    setBusy(detect, true);
+                    fetch('/api/discover-feed', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({ url: addUrl.value.trim() }) })
+                        .then(response => response.json().then(data => {
+                            if (!response.ok) throw new Error(data.error || response.statusText);
+                            if (data.feeds.length === 1) { useFeed(data.feeds[0]); return; }
+                            addFound.replaceChildren('Several feeds found:', ...data.feeds.map(found =>
+                                el('button', { type: 'button', class: 'ghost', title: found.url,
+                                               textContent: found.title || found.url, onclick: () => useFeed(found) })));
+                            addFound.hidden = false;
+                        }))
+                        .catch(error => { addError.textContent = error.message; })
+                        .finally(() => setBusy(detect, false));
+                } });
+            function addFeed() {
+                const feed = { name: addName.value.trim(), url: addUrl.value.trim(), mailbox: addFolder.value.trim() || 'INBOX',
+                               fulltext: addFulltext.checked, active: true, extra: [] };
+                const error = nameError(feed.name, null) || (/^https?:\/\/\S+$/.test(feed.url) ? '' : 'Please enter a feed URL starting with http:// or https://.');
+                addError.textContent = error;
+                if (error) return;
+                feeds.push(feed);
+                tbody.querySelector('.empty-row')?.remove();
+                tbody.append(row(feed));
+                commit();
+                search.value = '';
+                applySearch();
+                addName.value = addUrl.value = '';
+                addFulltext.checked = false;
+                rows.get(feed).scrollIntoView({ block: 'nearest' });
+                addName.focus();
+            }
+            const addBox = el('div', { class: 'add-feed', hidden: true, onkeydown: e => {
+                if (e.key === 'Enter') { e.preventDefault(); addFeed(); }
+            } }, [
+                el('div', { class: 'grid' }, [
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-name' }, ['Name']), addName]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-url' }, ['Feed or website URL']), el('div', { class: 'url-detect' }, [addUrl, detect])]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-folder' }, ['Mail folder']), addFolder]),
+                    el('div', {}, [el('label', { htmlFor: 'add-feed-fulltext' }, ['Full text']), el('div', { class: 'check' }, [addFulltext])]),
+                    el('button', { type: 'button', textContent: 'Add', onclick: addFeed }),
+                ]),
+                addFound,
+                addError,
+            ]);
+            const addToggle = el('button', { type: 'button', textContent: '+ Add feed', onclick: () => {
+                addBox.hidden = !addBox.hidden;
+                addToggle.textContent = addBox.hidden ? '+ Add feed' : 'Close';
+                addToggle.className = addBox.hidden ? '' : 'ghost';
+                if (!addBox.hidden) addName.focus();
+            } });
+
+            feeds.forEach(feed => tbody.append(row(feed)));
+            if (!feeds.length) tbody.append(el('tr', { class: 'empty-row' }, [el('td', { colSpan: 6 }, ['No feeds yet. Add one or import an OPML file under Actions.'])]));
+            gui.replaceChildren(
+                el('div', { class: 'toolbar' }, [search, count, addToggle]),
+                addBox,
+                el('div', { class: 'feed-table-wrap' }, [el('table', { class: 'feed-table' }, [
+                    el('colgroup', {}, [el('col'), el('col', { class: 'c-name' }), el('col', { class: 'c-url' }), el('col', { class: 'c-folder' }), el('col'), el('col')]),
+                    el('thead', {}, [el('tr', {}, [
+                        el('th', { class: 'center' }, ['Active']), el('th', {}, ['Name']), el('th', {}, ['Feed URL']),
+                        el('th', {}, ['Mail folder']), el('th', { class: 'center' }, ['Full text']), el('th'),
+                    ])]),
+                    tbody,
+                ])]),
+            );
+            const paused = feeds.filter(f => !f.active).length;
+            count.textContent = `${feeds.length} feed${feeds.length === 1 ? '' : 's'}` + (paused ? `, ${paused} paused` : '');
+        }
+
+        // --- Filter (filter.txt: one keyword per line) ---
+        function renderFilter() {
+            const gui = document.getElementById('filter-gui');
+            const words = field('filter').value.split('\n').map(w => w.trim()).filter(Boolean);
+            const commit = () => setField('filter', words.length ? words.join('\n') + '\n' : '');
+            const chips = el('div', { class: 'chips' });
+            const draw = () => {
+                chips.replaceChildren(...words.map((word, i) => el('span', { class: 'chip' }, [
+                    word,
+                    el('button', { type: 'button', textContent: '×', title: `Remove "${word}"`, 'aria-label': `Remove ${word}`,
+                                   onclick: () => { words.splice(i, 1); commit(); draw(); } }),
+                ])));
+                if (!words.length) chips.append(el('span', { class: 'hint' }, ['No filter keywords yet.']));
+            };
+            const input = el('input', { type: 'text', placeholder: 'Add a keyword and press Enter', 'aria-label': 'New filter keyword',
+                                        onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); add(); } } });
+            function add() {
+                const word = input.value.trim();
+                input.value = '';
+                if (!word || words.some(w => w.toLowerCase() === word.toLowerCase())) return;
+                words.push(word);
+                commit();
+                draw();
+            }
+            gui.replaceChildren(
+                el('p', { class: 'hint' }, ['Mails whose subject contains one of these keywords (case-insensitive) are moved to the "Folder for filtered mails" from Settings. Short words also match inside longer ones: "AI" matches "Malaysia".']),
+                el('div', { class: 'toolbar' }, [input, el('button', { type: 'button', textContent: 'Add', onclick: add })]),
+                chips,
+            );
+            draw();
+        }
+
+        // --- Killfile (killfile.txt: phrases separated by a blank line) ---
+        function renderKillfile() {
+            const gui = document.getElementById('killfile-gui');
+            const phrases = field('killfile').value.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+            // a blank line inside a phrase would split it in two
+            const commit = () => {
+                const clean = phrases.map(p => p.replace(/\n\s*\n/g, '\n').trim()).filter(Boolean);
+                setField('killfile', clean.length ? clean.join('\n\n') + '\n' : '');
+            };
+            const list = el('div');
+            const draw = () => {
+                list.replaceChildren(...phrases.map((phrase, i) => el('div', { class: 'phrase' }, [
+                    el('textarea', { value: phrase, rows: Math.min(8, Math.max(2, Math.ceil(phrase.length / 90) + 1)), 'aria-label': `Phrase ${i + 1}`,
+                                     oninput: e => { phrases[i] = e.target.value; commit(); } }),
+                    el('button', { type: 'button', class: 'danger', textContent: '✕', title: 'Remove phrase', 'aria-label': 'Remove phrase',
+                                   onclick: () => { phrases.splice(i, 1); commit(); draw(); } }),
+                ])));
+                if (!phrases.length) list.append(el('p', { class: 'hint' }, ['No phrases yet.']));
+            };
+            gui.replaceChildren(
+                el('p', { class: 'hint' }, ['These phrases are removed from the article text before it is mailed, e.g. subscription notices or boilerplate at the end of articles.']),
+                list,
+                el('button', { type: 'button', class: 'secondary', textContent: '+ Add phrase', onclick: () => {
+                    phrases.push('');
+                    draw();
+                    list.querySelector('.phrase:last-child textarea').focus();
+                } }),
+            );
+            draw();
+        }
+
+        const renderers = { config: renderConfig, feeds: renderFeeds, filter: renderFilter, killfile: renderKillfile };
+        document.querySelectorAll('[data-raw]').forEach(box => box.addEventListener('change', () => {
+            const name = box.dataset.raw;
+            field(name).hidden = !box.checked;
+            document.getElementById(`${name}-gui`).hidden = box.checked;
+            if (!box.checked) renderers[name]();  // pick up edits made in text mode
+        }));
+        document.querySelectorAll('form textarea').forEach(t => t.addEventListener('input', markDirty));
+        Object.values(renderers).forEach(render => render());
+
+        // Folder suggestions from the feed mailbox; the GUI works without them
+        const folderList = el('datalist', { id: 'imap-folders' });
+        document.body.append(folderList);
+        const imapFolders = fetch('/api/folders')
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.error || 'Could not load folders');
+                return data;
+            }));
+        imapFolders
+            .then(folders => folders.forEach(name => folderList.append(el('option', { value: name }))))
+            .catch(() => {});
+
+        // ---------- Setup wizard ----------
+        const NEEDS_SETUP = {{ needs_setup | tojson }};
+        const wizard = document.getElementById('wizard');
+        const wz = id => document.getElementById('wz-' + id);
+        const wzSteps = [...wizard.querySelectorAll('.wz-body[data-step]')];
+        const wzLabels = [...document.querySelectorAll('#wz-steps li')];
+        let wzStep = 0;
+
+        // Server names of common providers; everything else is guessed as imap./smtp.<domain>
+        const PROVIDERS = {
+            'gmx.de': ['imap.gmx.net', 'mail.gmx.net'], 'gmx.net': ['imap.gmx.net', 'mail.gmx.net'],
+            'web.de': ['imap.web.de', 'smtp.web.de'],
+            't-online.de': ['secureimap.t-online.de', 'securesmtp.t-online.de'],
+            'outlook.com': ['outlook.office365.com', 'smtp.office365.com'],
+            'hotmail.com': ['outlook.office365.com', 'smtp.office365.com'],
+            'icloud.com': ['imap.mail.me.com', 'smtp.mail.me.com'], 'me.com': ['imap.mail.me.com', 'smtp.mail.me.com'],
+            'posteo.de': ['posteo.de', 'posteo.de'],
+        };
+        function guessServers(email) {
+            const domain = (email.split('@')[1] || '').trim().toLowerCase();
+            if (!domain) return ['', ''];
+            return PROVIDERS[domain] || ['imap.' + domain, 'smtp.' + domain];
+        }
+
+        // Derived fields follow the email address until the user edits them
+        function autofill() {
+            const email = wz('email').value.trim();
+            const [imap, smtp] = guessServers(email);
+            const [rlImap, rlSmtp] = guessServers(wz('rl-email').value.trim());
+            const values = { email, imap, smtp, 'rl-imap': rlImap, 'rl-smtp': rlSmtp };
+            wizard.querySelectorAll('[data-auto]').forEach(input => {
+                if (!input.dataset.touched) input.value = values[input.dataset.auto];
+            });
+        }
+        // an emptied field goes back to its automatic value
+        wizard.querySelectorAll('input').forEach(input =>
+            input.addEventListener('input', () => { input.dataset.touched = input.value ? '1' : ''; }));
+        wz('email').addEventListener('input', autofill);
+        wz('rl-email').addEventListener('input', autofill);
+        wz('same-password').addEventListener('change', e => { wz('smtp-password-field').hidden = e.target.checked; });
+        wz('readlater').addEventListener('change', e => { wz('readlater-fields').hidden = !e.target.checked; });
+
+        function wzStatus(message, type) {
+            wz('status').textContent = message || '';
+            wz('status').className = 'wz-status ' + (type || '');
+        }
+
+        function showWizardStep(step) {
+            wzStep = step;
+            wzSteps.forEach((body, i) => { body.hidden = i !== step; });
+            wzLabels.forEach((li, i) => {
+                li.classList.toggle('active', i === step);
+                li.classList.toggle('done', i < step);
+            });
+            wz('back').hidden = step === 0;
+            wz('next').textContent = step === wzSteps.length - 1 ? 'Save' : 'Next';
+            wz('anyway').hidden = true;
+            wzStatus('');
+            const first = wzSteps[step].querySelector('input');
+            if (first) first.focus();
+        }
+
+        // Prefill from config.cfg, unless it only holds the example values
+        function prefillWizard() {
+            if (NEEDS_SETUP) return;
+            const sections = Object.fromEntries(parseIni(field('config').value)
+                .map(section => [section.name, Object.fromEntries(section.entries.map(e => [e.key.toLowerCase(), e.value.replace(/%%/g, '%')]))]));
+            const get = (section, key) => (sections[section] || {})[key.toLowerCase()] || '';
+            const set = (id, value) => { if (value) { wz(id).value = value; wz(id).dataset.touched = '1'; } };
+            set('email', get('SMTP', 'receiver_email') || get('IMAP', 'imapUser'));
+            set('password', get('IMAP', 'imapPasscode'));
+            set('imap-host', get('IMAP', 'imapHost'));
+            set('imap-user', get('IMAP', 'imapUser'));
+            set('smtp-host', get('SMTP', 'smtp_server'));
+            set('smtp-port', get('SMTP', 'port').trim());
+            set('smtp-user', get('SMTP', 'sender_email'));
+            set('receiver', get('SMTP', 'receiver_email'));
+            const smtpPassword = get('SMTP', 'password');
+            if (smtpPassword && smtpPassword !== get('IMAP', 'imapPasscode')) {
+                wz('same-password').checked = false;
+                wz('smtp-password-field').hidden = false;
+                set('smtp-password', smtpPassword);
+            }
+            set('unread', get('Mailings', 'unread_folder'));
+            set('filter', get('options', 'filterfolder'));
+            const rlHost = get('IMAP-Artikelpostfach', 'imapHost');
+            if (rlHost && !rlHost.toLowerCase().endsWith('example.com')) {
+                wz('readlater').checked = true;
+                wz('readlater-fields').hidden = false;
+                set('rl-email', get('IMAP-Artikelpostfach', 'imapUser'));
+                set('rl-password', get('IMAP-Artikelpostfach', 'imapPasscode'));
+                set('rl-imap-host', rlHost);
+                set('rl-smtp-host', get('SMTP-Artikelpostfach', 'smtp_server'));
+                set('rl-smtp-port', get('SMTP-Artikelpostfach', 'port').trim());
+            }
+        }
+
+        function openWizard() {
+            showWizardStep(0);
+            wizard.showModal();
+        }
+        function closeWizard() {
+            wizard.close();
+            try { sessionStorage.setItem('nsm-wizard-skipped', '1'); } catch (e) {}
+        }
+        wizard.addEventListener('cancel', () => {
+            try { sessionStorage.setItem('nsm-wizard-skipped', '1'); } catch (e) {}
+        });
+
+        function testLogin(params) {
+            return fetch('/api/setup/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
+            }).then(response => response.json()).then(result => {
+                if (!result.ok) throw new Error(result.error);
+                return result;
+            });
+        }
+
+        const smtpPassword = () => wz('same-password').checked ? wz('password').value : wz('smtp-password').value;
+        const REQUIRED = [
+            ['email', 'password', 'imap-host', 'imap-user'],
+            ['smtp-host', 'smtp-port', 'smtp-user', 'receiver'],
+            ['unread', 'filter'],
+            [],
+        ];
+
+        // An input problem, as opposed to a failed connection test (which the user may skip)
+        function invalid(message, input) {
+            if (input) input.focus();
+            return Promise.reject(Object.assign(new Error(message), { invalid: true }));
+        }
+
+        // Checks the current step; resolves when it is fine, rejects with a message otherwise
+        function checkStep(step) {
+            const missing = REQUIRED[step].find(id => !wz(id).value.trim());
+            if (missing) return invalid('Please fill in all fields.', wz(missing));
+            if (step === 1 && !wz('same-password').checked && !wz('smtp-password').value) return invalid('Please enter the SMTP password.', wz('smtp-password'));
+            if (step === 0) {
+                return testLogin({ kind: 'imap', host: wz('imap-host').value.trim(), user: wz('imap-user').value.trim(), password: wz('password').value })
+                    .then(result => {
+                        wz('folder-list').replaceChildren(...result.folders.map(name => el('option', { value: name })));
+                        // sensible folder defaults for a new setup, using the server's folder separator
+                        if (!wz('unread').dataset.touched) wz('unread').value = result.inbox + result.delim + 'artikel_unread';
+                        if (!wz('filter').dataset.touched) wz('filter').value = result.trash || 'Trash';
+                    });
+            }
+            if (step === 1) {
+                return testLogin({ kind: 'smtp', host: wz('smtp-host').value.trim(), port: wz('smtp-port').value, user: wz('smtp-user').value.trim(), password: smtpPassword() });
+            }
+            if (step === 3 && wz('readlater').checked) {
+                const missingRl = ['rl-email', 'rl-password', 'rl-imap-host', 'rl-smtp-host', 'rl-smtp-port'].find(id => !wz(id).value.trim());
+                if (missingRl) return invalid('Please fill in all fields of the read-later mailbox.', wz(missingRl));
+                const same = wz('rl-email').value.trim().toLowerCase() === wz('imap-user').value.trim().toLowerCase()
+                          && wz('rl-imap-host').value.trim().toLowerCase() === wz('imap-host').value.trim().toLowerCase();
+                if (same) return invalid('The read-later mailbox must not be your main mailbox: every mail in its inbox would be moved to “Archiv”.', wz('rl-email'));
+                return testLogin({ kind: 'imap', host: wz('rl-imap-host').value.trim(), user: wz('rl-email').value.trim(), password: wz('rl-password').value })
+                    .then(() => testLogin({ kind: 'smtp', host: wz('rl-smtp-host').value.trim(), port: wz('rl-smtp-port').value, user: wz('rl-email').value.trim(), password: wz('rl-password').value }));
+            }
+            return Promise.resolve();
+        }
+
+        function saveWizard() {
+            const data = {
+                imap: { host: wz('imap-host').value.trim(), user: wz('imap-user').value.trim(), password: wz('password').value },
+                smtp: { host: wz('smtp-host').value.trim(), port: wz('smtp-port').value.trim(), user: wz('smtp-user').value.trim(),
+                        password: smtpPassword(), receiver: wz('receiver').value.trim() },
+                folders: { unread: wz('unread').value.trim(), filter: wz('filter').value.trim() },
+                readlater: wz('readlater').checked ? {
+                    user: wz('rl-email').value.trim(), password: wz('rl-password').value, imap_host: wz('rl-imap-host').value.trim(),
+                    smtp_host: wz('rl-smtp-host').value.trim(), smtp_port: wz('rl-smtp-port').value.trim(),
+                } : null,
+            };
+            return fetch('/api/setup', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+            }).then(response => response.json().then(result => {
+                if (!response.ok) throw new Error(result.error || 'Saving failed');
+                let message = 'Mail account saved.';
+                if (result.created_folders.length) message += ' Created mail folders: ' + result.created_folders.join(', ');
+                if (result.folder_error) message += ' Could not create the folders: ' + result.folder_error;
+                // config.cfg changed on the server: reload so the editor shows it
+                try { sessionStorage.setItem('nsm-toast', message); } catch (e) {}
+                dirty = false;
+                location.reload();
+            }));
+        }
+
+        function advanceWizard() {
+            if (wzStep < wzSteps.length - 1) {
+                showWizardStep(wzStep + 1);
+                return Promise.resolve();
+            }
+            return saveWizard();
+        }
+
+        wz('next').addEventListener('click', () => {
+            const button = wz('next');
+            if (wzStep === wzSteps.length - 1 && dirty && !confirm('Saving reloads the page and discards your other unsaved changes. Continue?')) return;
+            setBusy(button, true);
+            wz('anyway').hidden = true;
+            wzStatus(wzStep === 0 || wzStep === 1 || (wzStep === 3 && wz('readlater').checked) ? 'Testing connection…' : '');
+            checkStep(wzStep)
+                .then(() => advanceWizard())
+                .catch(error => {
+                    wzStatus((error.invalid ? '' : 'Connection failed: ') + error.message, 'error');
+                    wz('anyway').hidden = !!error.invalid;  // e.g. the server blocks the test but the settings are right
+                })
+                .finally(() => setBusy(button, false));
+        });
+        wz('anyway').addEventListener('click', () => {
+            setBusy(wz('anyway'), true);
+            advanceWizard()
+                .catch(error => wzStatus(error.message, 'error'))
+                .finally(() => setBusy(wz('anyway'), false));
+        });
+        wz('back').addEventListener('click', () => showWizardStep(wzStep - 1));
+        wizard.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') {
+                e.preventDefault();
+                wz('next').click();
+            }
+        });
+
+        prefillWizard();
+        let wizardSkipped = false;
+        try { wizardSkipped = !!sessionStorage.getItem('nsm-wizard-skipped'); } catch (e) {}
+        if (NEEDS_SETUP && !wizardSkipped) openWizard();
+
+        // ---------- EPUB folder picker ----------
+        const folderPicker = document.getElementById('epub-folders');
+        const pickerList = document.getElementById('epub-folder-list');
+        const pickerDownload = document.getElementById('epub-folders-download');
+        const pickedFolders = () => [...pickerList.querySelectorAll('input:checked')].map(box => box.value);
+        const updatePicker = () => { pickerDownload.disabled = !pickedFolders().length; };
+        pickerList.addEventListener('change', updatePicker);
+
+        function openFolderPicker() {
+            folderPicker.showModal();
+            if (pickerList.dataset.loaded) return;
+            imapFolders
+                .then(folders => {
+                    pickerList.replaceChildren(...(folders.length
+                        ? folders.map(name => el('label', {}, [el('input', { type: 'checkbox', value: name }), name]))
+                        : [el('div', { class: 'empty' }, ['No folders found.'])]));
+                    pickerList.dataset.loaded = '1';
+                })
+                .catch(error => pickerList.replaceChildren(el('div', { class: 'empty' }, ['Could not load folders: ' + error.message])));
+        }
+
+        function selectAllFolders(checked) {
+            pickerList.querySelectorAll('input').forEach(box => { box.checked = checked; });
+            updatePicker();
+        }
+
+        function downloadFolders() {
+            const params = new URLSearchParams();
+            pickedFolders().forEach(name => params.append('folder', name));
+            if (document.getElementById('epub-unread-only').checked) params.append('unread', '1');
+            folderPicker.close();
+            downloadFile('download-epub?' + params, document.getElementById('epub-folders-open'));
+        }
+
+        window.addEventListener('beforeunload', e => {
+            if (dirty) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        const form = document.querySelector('form');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const button = document.getElementById('save-button');
+            setBusy(button, true);
+            setSaveState('saving', 'Saving…');
+            const formData = new FormData(this);
+
+            fetch('/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        let message = text;
+                        try { message = JSON.parse(text).error || text; } catch (e) {}
+                        throw new Error(message || `HTTP ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(result => {
+                dirty = false;
+                setSaveState('saved', 'All changes saved');
+                if (result.created_folders.length) {
+                    toast('Created mail folders: ' + result.created_folders.join(', '));
+                    result.created_folders.forEach(name => folderList.append(el('option', { value: name })));
+                }
+                if (result.folder_error) toast('Could not create missing mail folders: ' + result.folder_error, 'error');
+                setTimeout(() => { if (!dirty) setSaveState('clean', 'No unsaved changes'); }, 3000);
+            })
+            .catch(error => {
+                setSaveState('error', 'Saving failed');
+                toast('Could not save: ' + error.message, 'error');
+            })
+            .finally(() => setBusy(button, false));
+        });
+
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                form.requestSubmit();
+            }
+        });
+    </script>
+</body>
+</html>
+
