@@ -11,3 +11,4 @@ experiments/killfile.py
 
 # local test data with real credentials
 testdata/
+__pycache__/
