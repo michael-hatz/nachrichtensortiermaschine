@@ -44,6 +44,7 @@ FIRST_RUN_ITEMS = 10    # a newly subscribed feed only mails its newest entries
 REQUEST_TIMEOUT = 60    # seconds for feed/article downloads and IMAP connections
 FEED_TIMEOUT = 600      # max. seconds per feed, so a hanging feed can't block the others
 ERROR_MAIL_INTERVAL = 24  # hours; a feed that keeps failing is reported at most this often
+FETCH_RETRY_PAUSES = (5, 30)  # seconds to wait before each retry of a failed feed download
 
 
 class FeedTimeout(Exception):
@@ -399,13 +400,24 @@ def mark_seen(db, feed_url, entries, sent=False):
         db.executemany("INSERT OR IGNORE INTO seen_urls (url, feed, sent) VALUES (?, ?, ?)",
                        [(key, feed_url, int(sent)) for entry in entries for key in seen_keys(entry, feed_url)])
 
+def get_with_retry(url, user_agent):
+    """requests.get that retries on dropped connections and timeouts, which are usually
+    transient (e.g. hackaday.com: "Remote end closed connection without response")."""
+    for pause in FETCH_RETRY_PAUSES:
+        try:
+            return requests.get(url, headers={'User-Agent': user_agent}, timeout=REQUEST_TIMEOUT)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            print(f"Download of {url} failed ({e}), retrying in {pause} seconds")
+            time.sleep(pause)
+    return requests.get(url, headers={'User-Agent': user_agent}, timeout=REQUEST_TIMEOUT)
+
 def fetch_feed(url):
     """Download and parse a feed; raise if it can't be fetched or parsed."""
     #diese Nutzung von Feedparser ist, weil einige Seiten den Feedparser direkt blocken, bzw. requests ohne header
-    response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=REQUEST_TIMEOUT)
+    response = get_with_retry(url, 'Mozilla/5.0')
     if response.status_code in (403, 419, 429):
         # andere Seiten (z.B. news.ycombinator.com, 419 "Sorry") sperren gerade den Browser-User-Agent, lassen Feedreader aber durch
-        response = requests.get(url, headers={'User-Agent': 'nsm-feedreader/1.0'}, timeout=REQUEST_TIMEOUT)
+        response = get_with_retry(url, 'nsm-feedreader/1.0')
     response.raise_for_status()
     feed = feedparser.parse(response.content)
     if feed.bozo and not feed.entries:
